@@ -1,0 +1,61 @@
+<svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 100 40"
+        width="200"
+        height="80">
+
+    <!-- Definizione per il contorno del testo -->
+    <defs>
+        <filter id="text-outline" x="-0.05" y="-0.05" width="1.1" height="1.1">
+            <feFlood flood-color="#E11D48" result="bg" />
+            <feMorphology in="SourceAlpha" operator="dilate" radius="0.5" result="dilated" />
+            <feMerge>
+                <feMergeNode in="bg" />
+                <feMergeNode in="dilated" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+    </defs>
+
+    <!-- Tracciato ECG (Rosso) -->
+    <path
+            d="M 0 20 H 20 C 23 20, 23 15, 25 15 C 27 15, 27 20, 30 20 H 35 L 38 23 L 42 5 L 46 35 L 49 20 H 55 C 58 20, 58 15, 60 15 C 62 15, 62 20, 65 20 H 100"
+            fill="none"
+            stroke="#E11D48"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+    />
+
+    <!-- Testo "LisaSalute" (Bianco con contorno rosso) -->
+    <!-- Applichiamo il filtro per un contorno più pulito -->
+    <text
+            x="50"
+            y="23"
+            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+            font-size="12"
+            font-weight="bold"
+            fill="#FFFFFF"
+            stroke="#E11D48"
+            stroke-width="0.5"
+            text-anchor="middle"
+    >
+        LisaSalute
+    </text>
+
+    <!-- Testo di fallback senza filtro (commentato)
+    <text
+      x="50"
+      y="23"
+      font-family="Arial, sans-serif"
+      font-size="12"
+      font-weight="bold"
+      fill="#FFFFFF"
+      stroke="#E11D48"
+      stroke-width="0.5"
+      text-anchor="middle"
+    >
+      LisaSalute
+    </text>
+    -->
+</svg>

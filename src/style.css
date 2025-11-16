@@ -1,0 +1,8 @@
+/* Questo file importa i "layer" fondamentali di Tailwind CSS.
+  Vite li prenderà e li processerà con PostCSS (come da configurazione)
+  per generare il file CSS finale.
+*/
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
