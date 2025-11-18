@@ -10,7 +10,7 @@ import { fetchVitals } from '../store/diary.js'
 import {
   DATA_EXTRACTION_PROMPT,
   NURSE_ANALYSIS_PROMPT,
-  ECG_ANALYSIS_JSON_PROMPT, // <-- MODIFICATO
+  ECG_ANALYSIS_JSON_PROMPT,
   NURSE_GUIDE_PROMPT
 } from '../prompts'
 
@@ -140,7 +140,7 @@ export async function askLisa(userMessage, imageBase64 = null) {
 }
 
 //
-// --- FUNZIONE REFACTORING ---
+// --- FUNZIONE REFACTORING (Senza Schema) ---
 //
 /**
  * Analizza un record *già esistente* (da CSV o vecchio)
@@ -152,7 +152,7 @@ export async function analyzeExistingRecord(record) {
   console.log(`analyzeExistingRecord: Avvio analisi per ID: ${record.id}`);
 
   // 1. Costruisci un "falso" messaggio utente
-  let fakeUserMessage = 'Ciao Lisa, analizza per favore questi dati salvati:\n';
+  let fakeUserMessage = 'Buongiorno Dottoressa, analizza per favore questi dati salvati:\n';
   if (record.pressione_sistolica) {
     fakeUserMessage += `Pressione: ${record.pressione_sistolica}/${record.pressione_diastolica} mmHg\n`;
   }
@@ -166,9 +166,6 @@ export async function analyzeExistingRecord(record) {
     fakeUserMessage += `Braccio: ${record.braccio}\n`;
   }
 
-  // --- MODIFICA ---
-  // Se il record ha un ECG, dobbiamo usare la logica multimodale!
-  // (Questa è un'implementazione avanzata, per ora ci concentriamo sul testo)
   if (record.ecg_storage_path) {
     fakeUserMessage += "\n(Questo record ha anche un tracciato ECG associato)";
     // TODO: In futuro, dovremmo scaricare l'immagine dallo storage
@@ -257,20 +254,22 @@ async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
       return { frequenza_cardiaca: null, commento: "Non sono riuscita a leggere il tracciato." };
     }
 
-    const data = JSON.parse(cleanedText);
-    console.log('callGeminiForEcgAnalysis: Dati ECG Estratti:', data);
-    return data; // { frequenza_cardiaca: 115, commento: "..." }
+    try {
+      const data = JSON.parse(cleanedText);
+      console.log('callGeminiForEcgAnalysis: Dati ECG Estratti:', data);
+      return data; // { frequenza_cardiaca: 115, commento: "..." }
+    } catch (parseError) {
+      console.error("Errore parsing JSON (l'IA ha risposto con testo?):", parseError);
+      console.error("Testo ricevuto dall'IA:", cleanedText);
+      return {
+        frequenza_cardiaca: null,
+        commento: "Errore tecnico: L'IA ha restituito un formato illeggibile. Per favore, riprova."
+      };
+    }
 
-  } catch (error) {
-    console.error("Errore bloccante in callGeminiForEcgAnalysis:", error);
-    // --- MODIFICA ---
-    // Se il JSON.parse() fallisce (perché l'IA ha risposto con testo)
-    // restituiamo un errore gestibile.
-    return {
-      frequenza_cardiaca: null,
-      commento: "Errore tecnico nell'analisi dell'ECG. L'IA non ha restituito un JSON valido."
-    };
-    // throw error; // Non rilanciare, gestisci l'errore
+  } catch (apiError) {
+    console.error("Errore bloccante (API) in callGeminiForEcgAnalysis:", apiError);
+    throw apiError; // Rilancia l'errore a askLisa
   }
 }
 

@@ -5,7 +5,7 @@
   "description": "LisaSalute: App Vue.js per monitoraggio parametri vitali con Supabase.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port=5179",
     "build": "vite build",
     "preview": "vite preview"
   },
