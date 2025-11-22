@@ -59,23 +59,17 @@ export async function addMessage(role, content) {
     console.error('AddMessage: Utente non loggato.');
     return;
   }
-
-  //
-  // --- BUG FIX (riga 62) ---
-  // Dobbiamo controllare se 'content' esiste PRIMA di chiamare .trim()
-  //
   if (!content || !content.trim()) {
-    console.warn('AddMessage: Contenuto vuoto o undefined, stop.');
-    return; // Non salvare messaggi vuoti
+    console.warn('AddMessage: Contenuto vuoto, stop.');
+    return;
   }
-  // --- FINE FIX ---
 
   const userId = userSession.value.user.id
 
   const newMessage = {
     user_id: userId,
     role: role,
-    content: content // Ora sappiamo che 'content' è una stringa valida
+    content: content
   }
 
   try {
@@ -105,7 +99,9 @@ export async function addMessage(role, content) {
 }
 
 /**
- * Funzione helper per scrollare la chat in fondo
+ * Funzione helper per scrollare la chat in fondo.
+ * Usa un doppio approccio (subito + timeout) per gestire
+ * i ritardi di rendering del DOM (immagini, markdown).
  */
 export async function scrollToBottom() {
   // Aspetta il prossimo "tick" del DOM, così Vue ha tempo di renderizzare
@@ -113,7 +109,14 @@ export async function scrollToBottom() {
   // Seleziona il contenitore della chat (definito in ChatPage.vue)
   const container = document.getElementById('chat-container')
   if (container) {
-    container.scrollTop = container.scrollHeight
+    // Primo tentativo: subito
+    container.scrollTop = container.scrollHeight;
+
+    // Secondo tentativo: dopo un attimo (per sicurezza)
+    // Utile se ci sono immagini che si caricano o markdown pesante
+    setTimeout(() => {
+      if (container) container.scrollTop = container.scrollHeight;
+    }, 100);
   }
 }
 
@@ -160,7 +163,7 @@ export async function clearChatHistory() {
 
 
 //
-// --- NUOVA LOGICA REMINDER (SPOSTATA QUI) ---
+// --- LOGICA REMINDER ---
 //
 /**
  * Imposta un reminder IN-CHAT dopo N minuti.
@@ -173,7 +176,7 @@ export function setReminder(minutes) {
   console.log(`Timer IN-CHAT impostato: reminder tra ${minutes} minuti.`);
 
   setTimeout(() => {
-    // --- MODIFICATO ---
+    // Messaggio che viene inviato automaticamente da Lisa
     const messaggio = `Ciao ${nomeUtente}! Sono passati ${minutes} minuti. È il momento di effettuare la seconda misurazione della pressione come abbiamo discusso.`;
 
     console.log('Reminder: Invio messaggio in chat...');

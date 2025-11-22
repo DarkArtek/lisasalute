@@ -2,7 +2,7 @@
   <!-- Contenitore principale della pagina chat -->
   <div class="flex flex-col h-full">
 
-    <!-- Header (Modificato) -->
+    <!-- Header -->
     <div class="flex justify-between items-center p-4 border-b dark:border-gray-700">
       <div class="w-6"></div>
       <h1 class="text-2xl font-semibold text-center">Chat con Lisa</h1>
@@ -18,16 +18,29 @@
     <!-- 1. Area Messaggi -->
     <div
       id="chat-container"
-      class="flex-1 overflow-y-auto p-4 space-y-4"
+      class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
     >
-      <!-- ... (Loader, Errore, Benvenuto, v-for dei messaggi - tutto invariato) ... -->
+      <div v-if="loading" class="py-10">
+        <Loader />
+        <p class="text-center text-gray-500 dark:text-gray-400 mt-2">Caricamento cronologia...</p>
+      </div>
+
+      <div v-if="error" class="p-3 bg-red-100 dark:bg-red-900 border border-red-400 text-red-700 dark:text-red-200 rounded-lg">
+        <p><strong>Errore:</strong> {{ error }}</p>
+      </div>
+
+      <div v-if="!loading && messages.length === 0" class="text-center text-gray-500 dark:text-gray-400 py-10">
+        <font-awesome-icon icon="comment-dots" class="text-4xl mb-3" />
+        <p>Inizia la tua conversazione con Lisa.</p>
+        <p class="text-sm">Scrivi i tuoi parametri o fai una domanda.</p>
+      </div>
+
       <ChatMessage
         v-for="msg in messages"
         :key="msg.id"
         :message="msg"
       />
 
-      <!-- "Lisa sta scrivendo..." -->
       <div v-if="lisaIsTyping" class="flex justify-start">
         <div class="flex items-center max-w-xs px-4 py-3 rounded-lg shadow-md bg-white dark:bg-gray-700 rounded-bl-none">
           <font-awesome-icon icon="heart-pulse" class="text-xl mr-3 text-red-400 animate-pulse" />
@@ -39,35 +52,24 @@
     <!-- 2. Barra di Input (fissa in fondo) -->
     <form @submit.prevent="handleSend" class="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700 shadow-inner">
 
-      <!-- NUOVO: Anteprima Immagine Caricata -->
+      <!-- Anteprima Immagine Caricata -->
       <div v-if="previewImageUrl" class="mb-2 p-2 border dark:border-gray-600 rounded-lg inline-flex items-start">
         <img :src="previewImageUrl" class="w-20 h-20 object-cover rounded-md" alt="ECG Preview" />
-        <button
-          @click="clearImage"
-          type="button"
-          class="ml-2 text-red-500 hover:text-red-700"
-        >
-          Rimuovi
-        </button>
+        <button @click="clearAttachments" type="button" class="ml-2 text-red-500 hover:text-red-700">Rimuovi</button>
       </div>
 
       <!-- Input file nascosto (per la graffetta) -->
-      <input
-        type="file"
-        ref="fileInput"
-        @change="handleFileChange"
-        hidden
-        accept="image/jpeg"
-      />
+      <input type="file" ref="fileInputImage" @change="handleImageChange" hidden accept="image/jpeg" />
 
       <div class="flex items-center space-x-3">
 
-        <!-- NUOVO: Bottone Graffetta -->
+        <!-- Bottone Graffetta (Immagini) -->
         <button
           type="button"
-          @click="triggerFileInput"
+          @click="triggerImageInput"
           :disabled="lisaIsTyping"
           class="w-10 h-10 flex-shrink-0 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-500 rounded-full flex items-center justify-center disabled:opacity-50"
+          title="Allega ECG (JPG)"
         >
           <font-awesome-icon icon="paperclip" class="text-lg" />
         </button>
@@ -94,14 +96,15 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import {
   messages,
   loading,
   error,
   addMessage,
   clearChatHistory,
-  setReminder
+  setReminder,
+  scrollToBottom
 } from '../store/chat.js'
 import ChatMessage from '../components/ChatMessage.vue'
 import Loader from '../components/Loader.vue'
@@ -110,94 +113,86 @@ import { askLisa } from '../services/gemini.js'
 const newMessage = ref('')
 const lisaIsTyping = ref(false)
 
-// --- NUOVA LOGICA ECG ---
-const fileInput = ref(null)      // Riferimento all'input nascosto
-const imageBase64 = ref(null)    // Stringa Base64 per Gemini
-const previewImageUrl = ref(null) // URL per l'anteprima <img>
+// Quando la pagina viene caricata (anche tornando dal diario),
+// scorri subito in fondo.
+onMounted(() => {
+  scrollToBottom();
+});
 
-// 1. Bottone "Graffetta" clicca l'input
-const triggerFileInput = () => {
-  fileInput.value.click()
-}
+// --- LOGICA ALLEGATI (Solo Immagini) ---
+const fileInputImage = ref(null)
+const imageBase64 = ref(null)
+const previewImageUrl = ref(null)
 
-// 2. L'utente sceglie un file
-const handleFileChange = (event) => {
+const triggerImageInput = () => fileInputImage.value.click()
+
+const handleImageChange = (event) => {
   const file = event.target.files[0]
   if (!file) return;
   if (file.type !== 'image/jpeg') {
-    alert('Funzionalità al momento limitata: per favore carica solo file JPEG (.jpg o .jpeg).')
+    alert('Per le immagini, carica solo file JPEG.')
     return
   }
-
-  // Convertiamo l'immagine in Base64
   const reader = new FileReader()
-
   reader.onload = (e) => {
-    previewImageUrl.value = e.target.result // Per l'anteprima
-
-    // Estrai SOLO la stringa Base64 (tutto dopo la virgola)
-    const base64String = e.target.result.split(',')[1]
-    imageBase64.value = base64String
-
-    console.log('Immagine JPEG convertita in Base64.');
+    previewImageUrl.value = e.target.result
+    imageBase64.value = e.target.result.split(',')[1]
   }
-
-  // Avvia la lettura
   reader.readAsDataURL(file)
 }
 
-// 3. Rimuovi l'anteprima
-const clearImage = () => {
+const clearAttachments = () => {
   imageBase64.value = null
   previewImageUrl.value = null
-  fileInput.value.value = null // Resetta l'input file
+  if (fileInputImage.value) fileInputImage.value.value = null
 }
-// --- FINE LOGICA ECG ---
+// --- FINE LOGICA ALLEGATI ---
 
 
 const handleSend = async () => {
   const content = newMessage.value
-  const image = imageBase64.value
+  const img = imageBase64.value
 
-  if (!content.trim() && !image) return // Non inviare se è tutto vuoto
+  if (!content.trim() && !img) return
 
-  // Resetta gli input
+  // Prepariamo il messaggio utente per la chat
+  let userMessage = content
+  if (img) userMessage = content ? `${content} (Immagine ECG allegata)` : '(Immagine ECG allegata)'
+
   newMessage.value = ''
-  clearImage()
+  // Non puliamo ancora gli allegati, ci servono per askLisa
 
   try {
-    // Aggiungi il messaggio dell'utente alla chat
-    // (Se c'è un'immagine, aggiungiamo una nota al messaggio)
-    let userMessage = content
-    if (image) {
-      userMessage = content ? `${content} (Immagine ECG allegata)` : '(Immagine ECG allegata)'
-    }
-
     await addMessage('user', userMessage)
-
     lisaIsTyping.value = true
 
-    // --- MODIFICA CHIAVE ---
-    // Invia a Lisa sia il testo che l'immagine (Base64)
-    const { text: lisaResponse, action } = await askLisa(content, image)
-    // -----------------------
+    // Chiamiamo askLisa passando l'oggetto allegato corretto
+    let response;
+    if (img) {
+      // Passiamo l'immagine come attachment
+      response = await askLisa(content, { type: 'image', data: img, mime: 'image/jpeg' })
+    } else {
+      // Solo testo
+      response = await askLisa(content)
+    }
+
+    const { text: lisaResponse, action } = response
 
     await addMessage('assistant', lisaResponse)
 
-    // Gestisci il timer
     if (action === 'SET_TIMER_10_MIN') {
       setReminder(10);
     }
 
   } catch (err) {
     console.error('Errore in handleSend:', err)
-    await addMessage('assistant', err.message || 'Ops, ho avuto un problema tecnico. Riprova, per favore.')
+    await addMessage('assistant', err.message || 'Ops, ho avuto un problema tecnico.')
   } finally {
     lisaIsTyping.value = false
+    clearAttachments() // Pulisci dopo l'invio
   }
 }
 
-// Funzione per il bottone Pulisci
 const handleClearChat = async () => {
   console.log('Pulizia chat richiesta...');
   await clearChatHistory();
@@ -205,8 +200,7 @@ const handleClearChat = async () => {
 </script>
 
 <style scoped>
-/* Assicura che la pagina chat occupi l'altezza corretta */
 .h-full {
-  height: calc(100vh - 4rem); /* 100vh - altezza navbar */
+  height: calc(100vh - 4rem);
 }
 </style>

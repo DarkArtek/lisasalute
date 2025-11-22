@@ -22,7 +22,8 @@ import {
   faFileExport,
   faSpinner,
   faPaperclip,
-  faHeartbeat // <-- ICONA AGGIUNTA
+  faHeartbeat,
+  faFileAudio// <-- ICONA AGGIUNTA
 } from '@fortawesome/free-solid-svg-icons'
 
 // Aggiungiamo le icone alla libreria
@@ -37,7 +38,8 @@ library.add(
   faFileExport,
   faSpinner,
   faPaperclip,
-  faHeartbeat // <-- ICONA AGGIUNTA
+  faHeartbeat,
+  faFileAudio// <-- ICONA AGGIUNTA
 )
 
 // Creazione dell'istanza dell'app
