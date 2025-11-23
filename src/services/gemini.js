@@ -15,7 +15,7 @@ import {
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-const modelName = 'gemini-2.5-flash-preview-09-2025'
+const modelName = 'gemini-2.5-flash'
 
 const genAI = new GoogleGenerativeAI(apiKey)
 const model = genAI.getGenerativeModel({
@@ -41,6 +41,11 @@ export async function askLisa(userMessage, attachment = null) {
   let lisaResponseText = '';
   let actionToReturn = null;
   let savedVitals = null;
+
+  // --- NUOVO: Conta le misurazioni di oggi ---
+  const todaysCount = await getTodaysMeasurementCount(userSession.value?.user?.id);
+  console.log(`askLisa: Misurazioni odierne trovate: ${todaysCount}`);
+  // ------------------------------------------
 
   try {
     // --- FASE 1: ESTRAZIONE DATI (SEMPRE ESEGUITA) ---
@@ -73,13 +78,24 @@ export async function askLisa(userMessage, attachment = null) {
 
       const s = extractedData.pressione_sistolica;
       const d = extractedData.pressione_diastolica;
+
+      // --- LOGICA TIMER AGGIORNATA ---
+      // Attiva il timer SOLO se:
+      // 1. La pressione è alta
+      // 2. Le misurazioni odierne sono MENO di 3
       if ((s && s >= 130) || (d && d >= 85)) {
-        actionToReturn = 'SET_TIMER_10_MIN';
+        if (todaysCount < 3) {
+          actionToReturn = 'SET_TIMER_10_MIN';
+          console.log('askLisa: Pressione alta, timer attivato (sotto limite giornaliero).');
+        } else {
+          console.log('askLisa: Pressione alta, ma timer BLOCCATO (limite giornaliero raggiunto).');
+        }
       }
 
+      // Passiamo il conteggio al contesto per Lisa
       const payload = {
         contents: buildChatHistory(userMessage),
-        systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT) }] },
+        systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount) }] },
       };
 
       lisaResponseText = await callGeminiApi(payload);
@@ -207,6 +223,26 @@ export async function generateClinicalSummary(profileData, vitalsData) {
  * FUNZIONI HELPER (Logica interna)
  * ==============================================================================
  */
+
+// --- HELPER CONTEGGIO ---
+async function getTodaysMeasurementCount(userId) {
+  if (!userId) return 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Inizio giornata
+
+  const { count, error } = await supabase
+    .from('vital_signs')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', today.toISOString());
+
+  if (error) {
+    console.error('Errore conteggio giornaliero:', error);
+    return 0;
+  }
+  return count || 0;
+}
 
 // --- HELPER ECG ---
 async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
@@ -369,7 +405,7 @@ async function saveExtractedVitals(data) {
   }
 }
 
-function buildSystemInstruction(mainPrompt) {
+function buildSystemInstruction(mainPrompt, todaysCount = 0) {
   const p = profile.value || {};
   const nome = p.nome || 'Paziente';
   const eta = p.data_di_nascita ?
@@ -382,6 +418,7 @@ CONTESTO PAZIENTE:
 - Età: ${eta}
 - Tipo Misuratore: ${p.tipo_misuratore || 'sconosciuto'}
 - Categorie Farmaci: ${p.farmaci_pressione ? 'Anti-Ipertensivi' : ''} ${p.farmaci_cuore ? 'Cardiaci' : ''} ${p.anticoagulanti ? 'Anticoagulanti' : ''}
+- MISURAZIONI ODIERNE: ${todaysCount} (Se >= 3, evita di chiedere altre misurazioni di routine)
 `;
 
   if (p.terapia_farmacologica && p.terapia_farmacologica.trim() !== '') {
