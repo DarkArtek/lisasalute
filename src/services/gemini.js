@@ -10,6 +10,7 @@ import {
   DATA_EXTRACTION_PROMPT,
   NURSE_ANALYSIS_PROMPT,
   ECG_ANALYSIS_JSON_PROMPT,
+  DOCTOR_REPORT_PROMPT,
   NURSE_GUIDE_PROMPT
 } from '../prompts'
 
@@ -143,6 +144,63 @@ export async function analyzeExistingRecord(record) {
   }
 }
 
+//
+// --- FUNZIONE PER IL REPORT PDF (MEDICO) ---
+//
+export async function generateClinicalSummary(profileData, vitalsData) {
+  console.log('generateClinicalSummary: Elaborazione dati per il medico...');
+
+  let sysSum = 0, diaSum = 0, hrSum = 0, count = 0;
+  let maxSys = 0;
+
+  vitalsData.forEach(v => {
+    if (v.pressione_sistolica) {
+      sysSum += v.pressione_sistolica;
+      diaSum += v.pressione_diastolica;
+      if (v.pressione_sistolica > maxSys) maxSys = v.pressione_sistolica;
+    }
+    if (v.frequenza_cardiaca) {
+      hrSum += v.frequenza_cardiaca;
+    }
+    count++;
+  });
+
+  const stats = count > 0 ? {
+    media_pa: `${Math.round(sysSum/count)}/${Math.round(diaSum/count)}`,
+    media_fc: Math.round(hrSum/count),
+    picco_sistolico: maxSys,
+    totale_misurazioni: count,
+    periodo: `${new Date(vitalsData[vitalsData.length-1].created_at).toLocaleDateString()} - ${new Date(vitalsData[0].created_at).toLocaleDateString()}`
+  } : { nota: "Dati insufficienti" };
+
+  const message = `
+    DATI PAZIENTE:
+    Nome: ${profileData.nome}
+    Età: ${profileData.data_di_nascita ? new Date().getFullYear() - new Date(profileData.data_di_nascita).getFullYear() : 'N/D'}
+
+    TERAPIA FARMACOLOGICA (Riferita):
+    ${profileData.terapia_farmacologica || 'Nessuna indicata'}
+
+    STATISTICHE PERIODO (${stats.periodo}):
+    Misurazioni totali: ${stats.totale_misurazioni}
+    Media Pressione: ${stats.media_pa} mmHg
+    Picco Sistolico: ${stats.picco_sistolico} mmHg
+    Media Frequenza: ${stats.media_fc} bpm
+  `;
+
+  try {
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: message }] }],
+      systemInstruction: { parts: [{ text: DOCTOR_REPORT_PROMPT }] }
+    });
+
+    return result.response.text();
+  } catch (error) {
+    console.error("Errore generazione riassunto clinico:", error);
+    return "Non è stato possibile generare il riassunto clinico automatico.";
+  }
+}
+
 
 /**
  * ==============================================================================
@@ -158,7 +216,7 @@ async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
   })
 
   try {
-    console.log('callGeminiForEcgAnalysis: Chiamo API per JSON ECG (senza schema)...');
+    console.log('callGeminiForEcgAnalysis: Chiamo API per JSON ECG...');
     const result = await extractionModel.generateContent([
       userMessage || "Analizza questo tracciato.",
       { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
@@ -317,16 +375,31 @@ function buildSystemInstruction(mainPrompt) {
   const eta = p.data_di_nascita ?
     new Date().getFullYear() - new Date(p.data_di_nascita).getFullYear() : 'sconosciuta';
 
-  const contestoProfilo = `
+  let contestoProfilo = `
 CONTESTO PAZIENTE:
 - Nome: ${nome}
 - Sesso: ${p.sesso || 'sconosciuto'}
 - Età: ${eta}
 - Tipo Misuratore: ${p.tipo_misuratore || 'sconosciuto'}
-- Farmaci Pressione: ${p.farmaci_pressione ? 'Si' : 'No'}
-- Farmaci Cuore: ${p.farmaci_cuore ? 'Si' : 'No'}
-- Anticoagulanti: ${p.anticoagulanti ? 'Si' : 'No'}
+- Categorie Farmaci: ${p.farmaci_pressione ? 'Anti-Ipertensivi' : ''} ${p.farmaci_cuore ? 'Cardiaci' : ''} ${p.anticoagulanti ? 'Anticoagulanti' : ''}
 `;
+
+  if (p.terapia_farmacologica && p.terapia_farmacologica.trim() !== '') {
+    contestoProfilo += `
+*** TERAPIA FARMACOLOGICA IN ATTO ***
+${p.terapia_farmacologica}
+*************************************
+`;
+  }
+
+  if (p.piano_terapeutico && p.piano_terapeutico.trim() !== '') {
+    contestoProfilo += `
+*** NOTE IMPORTANTI / PIANO COMPORTAMENTALE ***
+(Istruzioni specifiche per l'interazione con questo paziente):
+${p.piano_terapeutico}
+***********************************************
+`;
+  }
 
   const oraCorrente = new Date().toLocaleTimeString('it-IT', {
     hour: '2-digit', minute: '2-digit', hour12: false

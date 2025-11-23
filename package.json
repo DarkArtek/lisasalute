@@ -16,9 +16,14 @@
     "@fortawesome/vue-fontawesome": "^3.0.8",
     "@google/generative-ai": "^0.14.0",
     "@supabase/supabase-js": "^2.43.5",
+    "chart.js": "^4.5.1",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
     "marked": "^13.0.0",
     "papaparse": "^5.4.1",
     "vue": "^3.4.27",
+    "vue-chart.js": "^0.2.0",
+    "vue-chartjs": "^5.3.3",
     "vue-router": "^4.3.3"
   },
   "devDependencies": {

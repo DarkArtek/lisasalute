@@ -26,6 +26,11 @@
         <font-awesome-icon icon="user" class="text-2xl" />
         <span class="text-xs mt-1">Profilo</span>
       </router-link>
+
+      <router-link to="/grafici" class="nav-link" active-class="text-blue-500">
+        <font-awesome-icon icon="chart-line" class="text-2xl" />
+        <span class="text-xs mt-1">Grafici</span>
+      </router-link>
     </nav>
   </div>
 </template>
