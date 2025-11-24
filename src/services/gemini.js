@@ -140,21 +140,27 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   let sysSum = 0, diaSum = 0, hrSum = 0, count = 0;
   let maxSys = 0;
   
-  // --- 1. RACCOLTA DATI ECG ---
-  // Filtriamo i record che hanno un ECG allegato
+  // --- 1. RACCOLTA DATI ECG (MIGLIORATA) ---
   const ecgRecords = vitalsData.filter(v => v.ecg_storage_path);
   let ecgSummaryText = "Nessun tracciato ECG registrato nel periodo.";
   
   if (ecgRecords.length > 0) {
-    // Creiamo un elenco testuale degli ECG per l'IA
     const ecgDescriptions = ecgRecords.map(v => {
       const data = new Date(v.created_at).toLocaleDateString();
-      // Puliamo un po' il commento di Lisa per risparmiare token e togliere i saluti
-      const note = v.commento_lisa ? v.commento_lisa.substring(0, 200) + "..." : "Nessuna analisi registrata";
+      let note = v.commento_lisa || "Nessuna analisi registrata";
+      
+      // --- PULIZIA DISCLAIMER ---
+      // Rimuoviamo il disclaimer standard per risparmiare spazio e dare focus ai dati
+      note = note.replace(/\*\*ATTENZIONE:.*professionale\.\*\*/s, "").trim();
+      note = note.replace(/Sono una IA.*?medico\./s, "").trim();
+      
+      // Prendiamo più testo (fino a 1000 caratteri) per includere i dettagli clinici
+      if (note.length > 1000) note = note.substring(0, 1000) + "...";
+      
       return `- Data ${data}: ${note}`;
-    }).join('\n');
+    }).join('\n\n'); // Doppio a capo per separare bene
     
-    ecgSummaryText = `Sono presenti ${ecgRecords.length} tracciati ECG. Ecco le note preliminari:\n${ecgDescriptions}`;
+    ecgSummaryText = `Sono presenti ${ecgRecords.length} tracciati ECG. Ecco le note di osservazione (pulite dal disclaimer):\n${ecgDescriptions}`;
   }
   // ----------------------------
 
@@ -178,7 +184,6 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     periodo: `${new Date(vitalsData[vitalsData.length-1].created_at).toLocaleDateString()} - ${new Date(vitalsData[0].created_at).toLocaleDateString()}`
   } : { nota: "Dati insufficienti" };
 
-  // Inseriamo le note ECG nel messaggio per l'IA
   const message = `
     DATI PAZIENTE:
     Nome: ${profileData.nome}
