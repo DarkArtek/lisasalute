@@ -2,23 +2,22 @@
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai"
 import { supabase } from '../supabase'
 import { userSession } from '../store/auth'
-import { profile } from '../store/profile'
-import { messages } from '../store/chat' 
-import { fetchVitals } from '../store/diary.js' 
+import { profile, fetchProfile } from '../store/profile' // fetchProfile serve per ricaricare la memoria
+import { messages } from '../store/chat'
+import { fetchVitals } from '../store/diary.js'
 
-import { 
-  DATA_EXTRACTION_PROMPT, 
-  NURSE_ANALYSIS_PROMPT, 
+import {
+  DATA_EXTRACTION_PROMPT,
+  NURSE_ANALYSIS_PROMPT,
   ECG_ANALYSIS_JSON_PROMPT,
-  DOCTOR_REPORT_PROMPT, 
-  NURSE_GUIDE_PROMPT 
+  DOCTOR_REPORT_PROMPT
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-const modelName = 'gemini-2.5-pro' 
+const modelName = 'gemini-2.5-pro'
 
 const genAI = new GoogleGenerativeAI(apiKey)
-const model = genAI.getGenerativeModel({ 
+const model = genAI.getGenerativeModel({
   model: modelName,
   safetySettings: [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -32,61 +31,79 @@ const model = genAI.getGenerativeModel({
 /**
  * ==============================================================================
  * FUNZIONE PRINCIPALE: askLisa(userMessage, attachment)
+ * Attachment format: { type: 'image', data: base64, mime: string }
  * ==============================================================================
  */
 export async function askLisa(userMessage, attachment = null) {
   console.log('askLisa: Inizio esecuzione...');
-  
-  let lisaResponseText = ''; 
+
+  let lisaResponseText = '';
   let actionToReturn = null;
   let savedVitals = null;
-  
+
   try {
-    // --- FASE 1: ESTRAZIONE DATI ---
+    // --- FASE 1: ESTRAZIONE DATI + MEMORIA ---
     console.log('askLisa: [FASE 1] Avvio estrazione dati...');
     const extractedData = await callGeminiForExtraction(userMessage);
     console.log('askLisa: [FASE 1] Estrazione completata.', extractedData);
-    
+
+    // Gestione Memoria a Lungo Termine
+    if (extractedData.nuova_memoria) {
+      console.log('askLisa: Trovata nuova memoria da salvare:', extractedData.nuova_memoria);
+      await updateLongTermMemory(extractedData.nuova_memoria);
+      await fetchProfile(); // Ricarica il profilo per aggiornare il contesto
+    }
+
     // --- FASE 2: LOGICA MULTIMODALE ---
+
     if (attachment && attachment.type === 'image') {
-      // --- CASO ECG ---
+      // --- CASO ECG (IMMAGINE) ---
       console.log('askLisa: [FASE 2A] Avvio analisi ECG...');
+
       const ecgAnalysis = await callGeminiForEcgAnalysis(userMessage, attachment.data);
+
+      // Unisci i dati (se l'ECG ha rilevato BPM)
       extractedData.frequenza_cardiaca = ecgAnalysis.frequenza_cardiaca || extractedData.frequenza_cardiaca || null;
+
+      // Salva immagine e dati
       savedVitals = await uploadEcgAndSaveVitals(attachment.data, extractedData);
+
       lisaResponseText = ecgAnalysis.commento;
 
     } else {
       // --- CASO SOLO TESTO ---
       console.log('askLisa: [FASE 2B] Avvio analisi Testo...');
+
       savedVitals = await saveExtractedVitals(extractedData);
       console.log('askLisa: [FASE 2B] Dati DB salvati.', savedVitals);
-      
+
       const s = extractedData.pressione_sistolica;
       const d = extractedData.pressione_diastolica;
+      // Trigger Timer: se pressione alta (>=130/85)
       if ((s && s >= 130) || (d && d >= 85)) {
-        actionToReturn = 'SET_TIMER_10_MIN'; 
+        actionToReturn = 'SET_TIMER_10_MIN';
       }
-      
+
       const payload = {
         contents: buildChatHistory(userMessage),
         systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT) }] },
       };
+
       lisaResponseText = await callGeminiApi(payload);
     }
-    
+
     // --- FASE 3: AGGIORNAMENTO COMMENTO ---
     if (savedVitals && savedVitals.id && lisaResponseText) {
-       console.log('askLisa: Aggiorno vital_signs con commento finale.');
-       await supabase
-         .from('vital_signs')
-         .update({ commento_lisa: lisaResponseText })
-         .eq('id', savedVitals.id);
-       fetchVitals(); 
+      console.log('askLisa: Aggiorno vital_signs con commento finale.');
+      await supabase
+        .from('vital_signs')
+        .update({ commento_lisa: lisaResponseText })
+        .eq('id', savedVitals.id);
+      fetchVitals();
     } else if (savedVitals) {
-       fetchVitals();
+      fetchVitals();
     }
-    
+
     console.log('askLisa: Esecuzione terminata.');
     return { text: lisaResponseText, action: actionToReturn };
 
@@ -96,38 +113,60 @@ export async function askLisa(userMessage, attachment = null) {
   }
 }
 
+// --- FUNZIONE AGGIORNAMENTO MEMORIA ---
+async function updateLongTermMemory(newMemory) {
+  if (!userSession.value) return;
+  const userId = userSession.value.user.id;
+
+  const currentNotes = profile.value?.piano_terapeutico || '';
+  const today = new Date().toLocaleDateString();
+  const updatedNotes = `${currentNotes}\n- [${today}] ${newMemory}`.trim();
+
+  console.log('updateLongTermMemory: Scrivo nel DB:', updatedNotes);
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({ piano_terapeutico: updatedNotes })
+    .eq('id', userId);
+
+  if (error) console.error('Errore aggiornamento memoria:', error);
+}
+
 // --- ANALISI RECORD ESISTENTE ---
 export async function analyzeExistingRecord(record) {
   console.log(`analyzeExistingRecord: Avvio analisi per ID: ${record.id}`);
-  
+
   let fakeUserMessage = 'Buongiorno Dottoressa, analizza per favore questi dati salvati:\n';
   if (record.pressione_sistolica) fakeUserMessage += `Pressione: ${record.pressione_sistolica}/${record.pressione_diastolica} mmHg\n`;
   if (record.frequenza_cardiaca) fakeUserMessage += `Frequenza: ${record.frequenza_cardiaca} bpm\n`;
   if (record.saturazione_ossigeno) fakeUserMessage += `Saturazione: ${record.saturazione_ossigeno} %\n`;
   if (record.braccio) fakeUserMessage += `Braccio: ${record.braccio}\n`;
-  
+
   if (record.ecg_storage_path) {
-     fakeUserMessage += "\n(Questo record ha anche un tracciato ECG associato)";
+    fakeUserMessage += "\n(Questo record ha anche un tracciato ECG associato)";
   }
-  
+
   try {
-    const analysisPrompt = NURSE_ANALYSIS_PROMPT; 
+    const analysisPrompt = NURSE_ANALYSIS_PROMPT;
     const systemInstruction = buildSystemInstruction(analysisPrompt);
     const chatHistory = [{
       role: 'user',
       parts: [{ text: fakeUserMessage }]
-    }]; 
+    }];
 
     const payload = {
       contents: chatHistory,
-      systemInstruction: { parts: [{ text: systemInstruction }] },
+      systemInstruction: {
+        parts: [{ text: systemInstruction }]
+      },
     };
 
     const lisaResponse = await callGeminiApi(payload);
     return lisaResponse;
+
   } catch (error) {
-     console.error("Errore bloccante in analyzeExistingRecord:", error);
-     throw error;
+    console.error("Errore bloccante in analyzeExistingRecord:", error);
+    throw error;
   }
 }
 
@@ -139,30 +178,24 @@ export async function generateClinicalSummary(profileData, vitalsData) {
 
   let sysSum = 0, diaSum = 0, hrSum = 0, count = 0;
   let maxSys = 0;
-  
-  // --- 1. RACCOLTA DATI ECG (MIGLIORATA) ---
+
+  // --- 1. RACCOLTA DATI ECG ---
   const ecgRecords = vitalsData.filter(v => v.ecg_storage_path);
   let ecgSummaryText = "Nessun tracciato ECG registrato nel periodo.";
-  
+
   if (ecgRecords.length > 0) {
     const ecgDescriptions = ecgRecords.map(v => {
       const data = new Date(v.created_at).toLocaleDateString();
       let note = v.commento_lisa || "Nessuna analisi registrata";
-      
-      // --- PULIZIA DISCLAIMER ---
-      // Rimuoviamo il disclaimer standard per risparmiare spazio e dare focus ai dati
+      // Pulizia disclaimer
       note = note.replace(/\*\*ATTENZIONE:.*professionale\.\*\*/s, "").trim();
       note = note.replace(/Sono una IA.*?medico\./s, "").trim();
-      
-      // Prendiamo più testo (fino a 1000 caratteri) per includere i dettagli clinici
       if (note.length > 1000) note = note.substring(0, 1000) + "...";
-      
       return `- Data ${data}: ${note}`;
-    }).join('\n\n'); // Doppio a capo per separare bene
-    
-    ecgSummaryText = `Sono presenti ${ecgRecords.length} tracciati ECG. Ecco le note di osservazione (pulite dal disclaimer):\n${ecgDescriptions}`;
+    }).join('\n\n');
+
+    ecgSummaryText = `Sono presenti ${ecgRecords.length} tracciati ECG. Ecco le note di osservazione:\n${ecgDescriptions}`;
   }
-  // ----------------------------
 
   vitalsData.forEach(v => {
     if (v.pressione_sistolica) {
@@ -188,16 +221,16 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     DATI PAZIENTE:
     Nome: ${profileData.nome}
     Età: ${profileData.data_di_nascita ? new Date().getFullYear() - new Date(profileData.data_di_nascita).getFullYear() : 'N/D'}
-    
+
     TERAPIA FARMACOLOGICA (Riferita):
     ${profileData.terapia_farmacologica || 'Nessuna indicata'}
-    
+
     STATISTICHE PERIODO (${stats.periodo}):
     Misurazioni totali: ${stats.totale_misurazioni}
     Media Pressione: ${stats.media_pa} mmHg
     Picco Sistolico: ${stats.picco_sistolico} mmHg
     Media Frequenza: ${stats.media_fc} bpm
-    
+
     REPORT TRACCIATI ECG:
     ${ecgSummaryText}
   `;
@@ -207,7 +240,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
       contents: [{ role: 'user', parts: [{ text: message }] }],
       systemInstruction: { parts: [{ text: DOCTOR_REPORT_PROMPT }] }
     });
-    
+
     return result.response.text();
   } catch (error) {
     console.error("Errore generazione riassunto clinico:", error);
@@ -225,7 +258,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
 // --- HELPER ECG ---
 async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
   const extractionModel = genAI.getGenerativeModel({
-    model: modelName, 
+    model: modelName,
     systemInstruction: { parts: [{ text: ECG_ANALYSIS_JSON_PROMPT }] }
   })
 
@@ -238,20 +271,20 @@ async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
     const response = result.response;
     const jsonText = response.text();
     const cleanedText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
-    
+
     if (!cleanedText) return { frequenza_cardiaca: null, commento: "Non sono riuscita a leggere il tracciato." };
 
     try {
       const data = JSON.parse(cleanedText);
       console.log('callGeminiForEcgAnalysis: Dati ECG Estratti:', data);
-      return data; 
+      return data;
     } catch (parseError) {
       console.error("Errore parsing JSON ECG:", parseError);
-      return { frequenza_cardiaca: null, commento: cleanedText }; 
+      return { frequenza_cardiaca: null, commento: cleanedText };
     }
   } catch (apiError) {
     console.error("Errore bloccante (API) in callGeminiForEcgAnalysis:", apiError);
-    throw apiError; 
+    throw apiError;
   }
 }
 
@@ -267,9 +300,9 @@ async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
     frequenza_cardiaca: extractedData.frequenza_cardiaca || null,
     saturazione_ossigeno: extractedData.saturazione_ossigeno || null,
     braccio: extractedData.braccio || null,
-    commento_lisa: 'Analisi ECG in corso...' 
+    commento_lisa: 'Analisi ECG in corso...'
   };
-  
+
   const { data: savedRecord, error: insertError } = await supabase
     .from('vital_signs')
     .insert(vitalData)
@@ -284,7 +317,7 @@ async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
     .from('ecg_uploads')
     .upload(filePath, imageBase64, {
       contentType: 'image/jpeg',
-      upsert: false, 
+      upsert: false,
       encoding: 'base64'
     });
 
@@ -296,17 +329,17 @@ async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
       .eq('id', savedRecord.id)
       .select()
       .single();
-    return updatedRecord; 
+    return updatedRecord;
   }
-  
-  return savedRecord; 
+
+  return savedRecord;
 }
 
 // --- HELPER ESTRAZIONE ---
 async function callGeminiForExtraction(userMessage) {
   if (!userMessage.trim()) return {};
   const extractionModel = genAI.getGenerativeModel({
-    model: modelName, 
+    model: modelName,
     systemInstruction: { parts: [{ text: DATA_EXTRACTION_PROMPT }] }
   })
 
@@ -315,14 +348,14 @@ async function callGeminiForExtraction(userMessage) {
     const result = await extractionModel.generateContent(userMessage)
     const response = result.response
     const jsonText = response.text()
-    const cleanedText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();                 
+    const cleanedText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
     if (!cleanedText) return {};
     const data = JSON.parse(cleanedText)
     console.log('callGeminiForExtraction: Dati Estratti:', data)
     return data
   } catch (error) {
     console.error("Errore bloccante in callGeminiForExtraction:", error)
-    return {} 
+    return {}
   }
 }
 
@@ -341,8 +374,8 @@ async function saveExtractedVitals(data) {
       .from('vital_signs')
       .select('id')
       .eq('user_id', userId)
-      .is('braccio', null) 
-      .gte('created_at', fiveMinutesAgo) 
+      .is('braccio', null)
+      .gte('created_at', fiveMinutesAgo)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -355,10 +388,10 @@ async function saveExtractedVitals(data) {
         .eq('id', lastRecord.id)
         .select()
         .single();
-      if (!updateError) return updatedData; 
+      if (!updateError) return updatedData;
     }
   }
-  
+
   const vitalData = {
     user_id: userId,
     pressione_sistolica: data.pressione_sistolica || null,
@@ -369,14 +402,14 @@ async function saveExtractedVitals(data) {
   };
 
   try {
-    console.log('saveExtractedVitals: Eseguo INSERT...', vitalData); 
+    console.log('saveExtractedVitals: Eseguo INSERT...', vitalData);
     const { data: savedData, error } = await supabase
       .from('vital_signs')
       .insert(vitalData)
       .select()
       .single();
     if (error) throw error;
-    return savedData; 
+    return savedData;
   } catch (error) {
     console.error('Errore bloccante in saveExtractedVitals:', error);
     return null;
@@ -386,9 +419,9 @@ async function saveExtractedVitals(data) {
 function buildSystemInstruction(mainPrompt) {
   const p = profile.value || {};
   const nome = p.nome || 'Paziente';
-  const eta = p.data_di_nascita ? 
+  const eta = p.data_di_nascita ?
     new Date().getFullYear() - new Date(p.data_di_nascita).getFullYear() : 'sconosciuta';
-    
+
   let contestoProfilo = `
 CONTESTO PAZIENTE:
 - Nome: ${nome}
@@ -408,24 +441,23 @@ ${p.terapia_farmacologica}
 
   if (p.piano_terapeutico && p.piano_terapeutico.trim() !== '') {
     contestoProfilo += `
-*** NOTE IMPORTANTI / PIANO COMPORTAMENTALE ***
-(Istruzioni specifiche per l'interazione con questo paziente):
+*** MEMORIA A LUNGO TERMINE / NOTE ***
 ${p.piano_terapeutico}
-***********************************************
+**************************************
 `;
   }
 
-  const oraCorrente = new Date().toLocaleTimeString('it-IT', { 
-    hour: '2-digit', minute: '2-digit', hour12: false 
+  const oraCorrente = new Date().toLocaleTimeString('it-IT', {
+    hour: '2-digit', minute: '2-digit', hour12: false
   });
   return `${mainPrompt}\n\n${contestoProfilo}\n\nCONTESTO TEMPORALE:\n- ORA CORRENTE: ${oraCorrente}`;
 }
 
 function buildChatHistory(userMessage) {
   const history = messages.value
-    .slice(-10) 
+    .slice(-10)
     .map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model', 
+      role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content }]
     }));
   history.push({
