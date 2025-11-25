@@ -14,7 +14,7 @@ import {
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-const modelName = 'gemini-2.5-pro'
+const modelName = 'gemini-2.5-pro' // O 'gemini-2.5-pro' se hai accesso
 
 const genAI = new GoogleGenerativeAI(apiKey)
 const model = genAI.getGenerativeModel({
@@ -156,14 +156,11 @@ export async function analyzeExistingRecord(record) {
 
     const payload = {
       contents: chatHistory,
-      systemInstruction: {
-        parts: [{ text: systemInstruction }]
-      },
+      systemInstruction: { parts: [{ text: systemInstruction }] },
     };
 
     const lisaResponse = await callGeminiApi(payload);
     return lisaResponse;
-
   } catch (error) {
     console.error("Errore bloccante in analyzeExistingRecord:", error);
     throw error;
@@ -176,7 +173,8 @@ export async function analyzeExistingRecord(record) {
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 
-  let sysSum = 0, diaSum = 0, hrSum = 0, count = 0;
+  let sysSum = 0, diaSum = 0, hrSum = 0;
+  let bpCount = 0, hrCount = 0;
   let maxSys = 0;
 
   // --- 1. RACCOLTA DATI ECG ---
@@ -198,24 +196,33 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   }
 
   vitalsData.forEach(v => {
-    if (v.pressione_sistolica) {
+    // Somma solo se i valori esistono (>0) per evitare medie falsate
+    if (v.pressione_sistolica && v.pressione_diastolica) {
       sysSum += v.pressione_sistolica;
       diaSum += v.pressione_diastolica;
       if (v.pressione_sistolica > maxSys) maxSys = v.pressione_sistolica;
+      bpCount++;
     }
     if (v.frequenza_cardiaca) {
       hrSum += v.frequenza_cardiaca;
+      hrCount++;
     }
-    count++;
   });
 
-  const stats = count > 0 ? {
-    media_pa: `${Math.round(sysSum/count)}/${Math.round(diaSum/count)}`,
-    media_fc: Math.round(hrSum/count),
-    picco_sistolico: maxSys,
-    totale_misurazioni: count,
-    periodo: `${new Date(vitalsData[vitalsData.length-1].created_at).toLocaleDateString()} - ${new Date(vitalsData[0].created_at).toLocaleDateString()}`
-  } : { nota: "Dati insufficienti" };
+  // Calcolo medie sicuro
+  const avgSys = bpCount > 0 ? Math.round(sysSum / bpCount) : 0;
+  const avgDia = bpCount > 0 ? Math.round(diaSum / bpCount) : 0;
+  const avgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : 0;
+
+  const stats = {
+    media_pa: bpCount > 0 ? `${avgSys}/${avgDia}` : "N/D",
+    media_fc: hrCount > 0 ? avgHr : "N/D",
+    picco_sistolico: maxSys > 0 ? maxSys : "N/D",
+    totale_misurazioni: vitalsData.length,
+    periodo: vitalsData.length > 0
+      ? `${new Date(vitalsData[vitalsData.length-1].created_at).toLocaleDateString()} - ${new Date(vitalsData[0].created_at).toLocaleDateString()}`
+      : "N/D"
+  };
 
   const message = `
     DATI PAZIENTE:
@@ -365,7 +372,7 @@ async function saveExtractedVitals(data) {
   if (!userSession.value) return null;
   const userId = userSession.value.user.id;
 
-  // Logica "Solo Braccio"
+  // Logica "Solo Braccio" (Merge)
   const isOnlyBraccio = data.braccio && !data.pressione_sistolica && !data.frequenza_cardiaca;
   if (isOnlyBraccio) {
     console.log('saveExtractedVitals: Ricevuto solo braccio. Tento un aggiornamento...');

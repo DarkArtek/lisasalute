@@ -24,31 +24,22 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
   // --- PREPARAZIONE TESTO ---
   // Sostituzione placeholder e pulizia
   let processedSummary = clinicalSummary || "";
-  const nowStr = new Date().toLocaleString('it-IT', { dateStyle: 'long', timeStyle: 'short' });
+  const nowStr = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
   processedSummary = processedSummary.replace('[Data e Ora corrente]', nowStr);
 
-  // Separazione Intro vs Analisi
-  // Cerchiamo il punto di divisione definito nel prompt ("Commento alla visita:")
-  const splitMarker = "Commento alla visita:";
+  // CERCHIAMO IL SEGNALIBRO PER LA TABELLA (Inserito dal prompt)
+  const splitMarker = "--- TABELLA DATI ---";
   let introText = "";
   let analysisText = processedSummary;
 
-  // Se troviamo il separatore, dividiamo il testo
   if (processedSummary.includes(splitMarker)) {
     const parts = processedSummary.split(splitMarker);
     introText = parts[0].trim();
-    // Rimettiamo il titolo "Commento alla visita" in grassetto o come inizio della seconda parte
-    analysisText = splitMarker + " " + parts.slice(1).join(splitMarker).trim();
+    analysisText = parts[1].trim();
   } else {
-    // Fallback: se l'IA non ha usato il separatore esatto,
-    // proviamo a prendere la prima frase come intro se è breve,
-    // altrimenti mettiamo tutto dopo la tabella per sicurezza.
-    if (processedSummary.length > 0 && processedSummary.indexOf('\n') < 200) {
-      // Se c'è un a capo presto, usalo come divisore
-      const firstBreak = processedSummary.indexOf('\n');
-      introText = processedSummary.substring(0, firstBreak).trim();
-      analysisText = processedSummary.substring(firstBreak).trim();
-    }
+    // Fallback: se l'IA dimentica il marker, mettiamo tutto DOPO la tabella
+    introText = ""; // O una frase generica se preferisci
+    analysisText = processedSummary;
   }
 
   // --- 2. NOTA INTRODUTTIVA (PRIMA DELLA TABELLA) ---
@@ -60,7 +51,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     const splitIntro = doc.splitTextToSize(introText, 180);
     doc.text(splitIntro, 14, currentY);
 
-    // Aggiorna Y in base all'altezza del testo (circa 5mm per riga)
+    // Aggiorna Y in base all'altezza del testo (circa 5mm per riga) + margine
     currentY += (splitIntro.length * 5) + 5;
   }
 
@@ -77,7 +68,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
   ]);
 
   autoTable(doc, {
-    startY: currentY, // Inizia subito dopo l'intro
+    startY: currentY,
     head: [['Data/Ora', 'PA (mmHg)', 'FC', 'SpO2', 'Braccio', 'ECG']],
     body: tableData,
     theme: 'grid',
@@ -94,9 +85,9 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
   // Aggiorna Y alla fine della tabella
   currentY = doc.lastAutoTable.finalY + 15;
 
-  // --- 4. COMMENTO ALLA VISITA (DOPO LA TABELLA) ---
+  // --- 4. COMMENTO ALLA VISITA / ANALISI (DOPO LA TABELLA) ---
   if (analysisText) {
-    // Controllo cambio pagina
+    // Controllo cambio pagina se siamo troppo in basso
     if (currentY > 250) {
       doc.addPage();
       currentY = 20;
@@ -106,8 +97,8 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     doc.setFontSize(11);
     doc.setTextColor(0);
 
-    // Rimuovi eventuali markdown residui (come **) per pulizia base
-    let cleanAnalysis = analysisText.replace(/\*\*/g, "");
+    // Pulizia base markdown residuo
+    let cleanAnalysis = analysisText.replace(/\*\*/g, "").replace(/__/g, "");
 
     const splitAnalysis = doc.splitTextToSize(cleanAnalysis, 180);
     doc.text(splitAnalysis, 14, currentY);
@@ -122,6 +113,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
 
     const footerText = `Pagina ${i} di ${pageCount} - Generato da LisaSalute. Documento informativo di supporto, non sostituisce referto medico ufficiale.`;
 
+    // Centra il footer
     const textWidth = doc.getStringUnitWidth(footerText) * doc.internal.getFontSize() / doc.internal.scaleFactor;
     const textOffset = (doc.internal.pageSize.width - textWidth) / 2;
 
@@ -130,12 +122,14 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
 
   // --- 6. SALVATAGGIO FILE ---
   const now = new Date();
+  // Formato: YYYYMMDD_HHmm
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   const hour = String(now.getHours()).padStart(2, '0');
   const minute = String(now.getMinutes()).padStart(2, '0');
 
+  // Sanitizza il nome del paziente per il file
   const safeName = (profileData.nome || 'Paziente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
   const filename = `referto_${safeName}_${year}${month}${day}_${hour}${minute}.pdf`;
