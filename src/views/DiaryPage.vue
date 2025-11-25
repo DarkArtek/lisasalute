@@ -73,7 +73,6 @@
     <div v-if="!loading && vitals.length === 0" class="text-center text-gray-500 dark:text-gray-400 py-10">
       <font-awesome-icon icon="book-medical" class="text-4xl mb-3" />
       <p>Nessuna misurazione trovata.</p>
-      <p class="text-sm">I dati che inserisci nella chat appariranno qui.</p>
     </div>
 
     <!-- Lista dei Record -->
@@ -127,7 +126,8 @@ import {
   requestAnalysis,
   batchAnalyzeRecords,
   importCSV,
-  exportCSV
+  exportCSV,
+  fetchAllVitalsForReport
 } from '../store/diary.js';
 
 // --- IMPORT NECESSARI PER PDF ---
@@ -172,14 +172,28 @@ const handleExport = () => {
 
 // --- LOGICA PDF ---
 const handleDoctorReport = async () => {
-  if (vitals.value.length === 0) {
+  // Recuperiamo TUTTI i dati, non solo quelli paginati
+  let allReportData = [];
+  const wasLoading = loading.value;
+  loading.value = true;
+
+  try {
+    allReportData = await fetchAllVitalsForReport();
+  } catch(e) {
+    alert("Errore nel recupero dei dati completi.");
+    loading.value = wasLoading;
+    return;
+  }
+
+  if (allReportData.length === 0) {
     alert("Nessun dato da inserire nel report.");
+    loading.value = wasLoading;
     return;
   }
 
   // Controllo completezza giornaliera (Scheduler)
   const todayStr = new Date().toLocaleDateString();
-  const todaysMeasurements = vitals.value.filter(v =>
+  const todaysMeasurements = allReportData.filter(v =>
     new Date(v.created_at).toLocaleDateString() === todayStr
   ).length;
 
@@ -190,30 +204,29 @@ const handleDoctorReport = async () => {
     if (profile.value.orario_sera) plannedCount++;
   }
 
-  let confirmMessage = "Vuoi generare un report PDF per il tuo medico? Lisa scriverà una sintesi clinica dei dati visualizzati.";
+  let confirmMessage = "Vuoi generare un report PDF completo per il tuo medico? Lisa scriverà una sintesi clinica dei dati visualizzati.";
 
   if (plannedCount > 0 && todaysMeasurements < plannedCount) {
-    confirmMessage = `ATTENZIONE: Oggi hai effettuato solo ${todaysMeasurements} misurazioni su ${plannedCount} previste dal tuo piano. Il report giornaliero potrebbe essere incompleto.\n\nVuoi generarlo comunque?`;
+    confirmMessage = `ATTENZIONE: Oggi hai effettuato solo ${todaysMeasurements} misurazioni su ${plannedCount} previste. Il report giornaliero potrebbe essere incompleto.\n\nVuoi generarlo comunque?`;
   }
 
-  if (!confirm(confirmMessage)) return;
-
-  // Salviamo lo stato di loading attuale per non sovrascriverlo
-  const wasLoading = loading.value;
-  loading.value = true;
+  if (!confirm(confirmMessage)) {
+    loading.value = wasLoading;
+    return;
+  }
 
   try {
     // 1. Genera la sintesi clinica con Gemini
-    const summary = await generateClinicalSummary(profile.value, vitals.value);
+    const summary = await generateClinicalSummary(profile.value, allReportData);
 
     // 2. Genera e scarica il PDF
-    await downloadDoctorReport(profile.value, vitals.value, summary);
+    await downloadDoctorReport(profile.value, allReportData, summary);
 
   } catch (e) {
     console.error(e);
     alert("Errore durante la generazione del report.");
   } finally {
-    loading.value = wasLoading; // Ripristina o metti a false
+    loading.value = wasLoading; // Ripristina stato precedente
     if (!wasLoading) loading.value = false;
   }
 };
