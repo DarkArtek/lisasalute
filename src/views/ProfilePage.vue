@@ -80,7 +80,7 @@
           </div>
         </fieldset>
 
-        <!-- NUOVO: Terapia Farmacologica Dettagliata -->
+        <!-- Terapia Farmacologica Dettagliata -->
         <div class="mt-4">
           <label for="terapia" class="block text-sm font-bold text-green-600 dark:text-green-400 mb-2">
             Elenco Farmaci (Terapia)
@@ -112,6 +112,39 @@
             class="input-field"
             placeholder="Esempio: Il cardiologo ha detto di controllare la pressione ogni volta che ho mal di testa."
           ></textarea>
+        </div>
+
+        <!-- CONFIGURAZIONE ORARI / SCHEDULER -->
+        <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <div class="flex items-center justify-between mb-4">
+            <label class="block text-sm font-bold text-purple-600 dark:text-purple-400">
+              <font-awesome-icon icon="clock" class="mr-1"/> Orari Misurazioni
+            </label>
+
+            <!-- Toggle Abilita/Disabilita -->
+            <div class="flex items-center">
+              <input type="checkbox" id="scheduler" v-model="profile.abilita_scheduler" class="checkbox-input mr-2">
+              <label for="scheduler" class="text-xs text-gray-600 dark:text-gray-400">Attiva Reminder Lisa</label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4" v-if="profile.abilita_scheduler">
+            <div>
+              <label class="text-xs block mb-1 text-gray-500">Mattina</label>
+              <input type="time" v-model="profile.orario_mattina" class="input-field text-center" />
+            </div>
+            <div>
+              <label class="text-xs block mb-1 text-gray-500">Pomeriggio</label>
+              <input type="time" v-model="profile.orario_pomeriggio" class="input-field text-center" />
+            </div>
+            <div>
+              <label class="text-xs block mb-1 text-gray-500">Sera</label>
+              <input type="time" v-model="profile.orario_sera" class="input-field text-center" />
+            </div>
+          </div>
+          <p class="text-xs text-gray-400 mt-2 italic">
+            * Lisa ti invierà un messaggio in chat quando è l'ora, se hai l'app aperta.
+          </p>
         </div>
 
         <button type="submit" :disabled="saveLoading" class="mt-6 w-full px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50">

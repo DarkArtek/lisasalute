@@ -6,7 +6,6 @@ import { userSession } from './auth.js'
  * Gestisce lo stato del profilo medico dell'utente.
  */
 
-// 'null' finché non è caricato. Conterrà { nome, sesso, ... }
 export const profile = ref(null)
 export const loading = ref(false)
 export const error = ref(null)
@@ -31,7 +30,7 @@ export async function fetchProfile() {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single() // Ci aspettiamo solo un risultato
+      .single()
 
     if (fetchError && fetchError.code !== 'PGRST116') {
       // PGRST116 = "nessuna riga trovata", non è un errore bloccante
@@ -43,7 +42,7 @@ export async function fetchProfile() {
       profile.value = data
     } else {
       // 3. Nessun profilo trovato (es. primo login)
-      // Inizializziamo un profilo vuoto nello store
+      // Inizializziamo un profilo vuoto con i valori di default
       profile.value = {
         id: userId,
         nome: '',
@@ -53,9 +52,14 @@ export async function fetchProfile() {
         farmaci_pressione: false,
         farmaci_cuore: false,
         anticoagulanti: false,
-        // Campi di memoria a lungo termine
-        piano_terapeutico: '', // Note comportamentali per Lisa
-        terapia_farmacologica: '' // Lista specifica dei farmaci
+        // Campi di memoria e terapia
+        piano_terapeutico: '',
+        terapia_farmacologica: '',
+        // Campi Scheduler (default attivi)
+        orario_mattina: '08:00',
+        orario_pomeriggio: '14:00',
+        orario_sera: '20:00',
+        abilita_scheduler: true
       }
     }
 
@@ -69,8 +73,6 @@ export async function fetchProfile() {
 
 /**
  * Aggiorna (o crea) il profilo dell'utente loggato.
- * Usa 'upsert' per creare se non esiste o aggiornare se esiste.
- * @param {object} profileData - I dati da salvare.
  */
 export async function updateProfile(profileData) {
   if (!userSession.value) return;
@@ -97,7 +99,7 @@ export async function updateProfile(profileData) {
   } catch (err) {
     console.error('Errore salvataggio profilo:', err.message)
     error.value = err.message
-    throw err // Rilanciamo l'errore per gestirlo nel componente
+    throw err
   } finally {
     loading.value = false
   }

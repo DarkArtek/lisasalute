@@ -24,7 +24,7 @@
         Esporta CSV
       </button>
 
-      <!-- NUOVO: Bottone PDF -->
+      <!-- Bottone PDF -->
       <button
         @click="handleDoctorReport"
         :disabled="loading || analyzingRecordId"
@@ -73,6 +73,7 @@
     <div v-if="!loading && vitals.length === 0" class="text-center text-gray-500 dark:text-gray-400 py-10">
       <font-awesome-icon icon="book-medical" class="text-4xl mb-3" />
       <p>Nessuna misurazione trovata.</p>
+      <p class="text-sm">I dati che inserisci nella chat appariranno qui.</p>
     </div>
 
     <!-- Lista dei Record -->
@@ -176,7 +177,26 @@ const handleDoctorReport = async () => {
     return;
   }
 
-  if (!confirm("Vuoi generare un report PDF per il tuo medico? Lisa scriverà una sintesi clinica dei dati visualizzati.")) return;
+  // Controllo completezza giornaliera (Scheduler)
+  const todayStr = new Date().toLocaleDateString();
+  const todaysMeasurements = vitals.value.filter(v =>
+    new Date(v.created_at).toLocaleDateString() === todayStr
+  ).length;
+
+  let plannedCount = 0;
+  if (profile.value && profile.value.abilita_scheduler) {
+    if (profile.value.orario_mattina) plannedCount++;
+    if (profile.value.orario_pomeriggio) plannedCount++;
+    if (profile.value.orario_sera) plannedCount++;
+  }
+
+  let confirmMessage = "Vuoi generare un report PDF per il tuo medico? Lisa scriverà una sintesi clinica dei dati visualizzati.";
+
+  if (plannedCount > 0 && todaysMeasurements < plannedCount) {
+    confirmMessage = `ATTENZIONE: Oggi hai effettuato solo ${todaysMeasurements} misurazioni su ${plannedCount} previste dal tuo piano. Il report giornaliero potrebbe essere incompleto.\n\nVuoi generarlo comunque?`;
+  }
+
+  if (!confirm(confirmMessage)) return;
 
   // Salviamo lo stato di loading attuale per non sovrascriverlo
   const wasLoading = loading.value;
