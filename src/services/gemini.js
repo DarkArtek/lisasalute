@@ -2,7 +2,7 @@
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai"
 import { supabase } from '../supabase'
 import { userSession } from '../store/auth'
-import { profile, fetchProfile } from '../store/profile' // fetchProfile serve per ricaricare la memoria
+import { profile, fetchProfile } from '../store/profile'
 import { messages } from '../store/chat'
 import { fetchVitals } from '../store/diary.js'
 
@@ -15,7 +15,6 @@ import {
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-// Usiamo il modello Pro per massima affidabilità clinica
 const modelName = 'gemini-2.5-pro'
 
 const genAI = new GoogleGenerativeAI(apiKey)
@@ -33,7 +32,6 @@ const model = genAI.getGenerativeModel({
 /**
  * ==============================================================================
  * FUNZIONE PRINCIPALE: askLisa(userMessage, attachment)
- * Attachment format: { type: 'image', data: base64, mime: string }
  * ==============================================================================
  */
 export async function askLisa(userMessage, attachment = null) {
@@ -44,13 +42,11 @@ export async function askLisa(userMessage, attachment = null) {
   let savedVitals = null;
 
   // --- CONTEGGIO GIORNALIERO (FILTRATO) ---
-  // Conta solo le misurazioni con pressione valida, escludendo note o auscultazioni
   const todaysCount = await getTodaysMeasurementCount(userSession.value?.user?.id);
   console.log(`askLisa: Misurazioni PRESSORIE odierne trovate: ${todaysCount}`);
-  // ----------------------------------------
 
   try {
-    // --- FASE 1: ESTRAZIONE DATI (SEMPRE ESEGUITA) ---
+    // --- FASE 1: ESTRAZIONE DATI ---
     console.log('askLisa: [FASE 1] Avvio estrazione dati...');
     const extractedData = await callGeminiForExtraction(userMessage);
     console.log('askLisa: [FASE 1] Estrazione completata.', extractedData);
@@ -59,7 +55,7 @@ export async function askLisa(userMessage, attachment = null) {
     if (extractedData.nuova_memoria) {
       console.log('askLisa: Trovata nuova memoria da salvare:', extractedData.nuova_memoria);
       await updateLongTermMemory(extractedData.nuova_memoria);
-      await fetchProfile(); // Ricarica il profilo per aggiornare il contesto
+      await fetchProfile();
     }
 
     // --- FASE 2: LOGICA MULTIMODALE ---
@@ -81,13 +77,9 @@ export async function askLisa(userMessage, attachment = null) {
       const d = extractedData.pressione_diastolica;
 
       // --- LOGICA TIMER ---
-      // Attiva solo se c'è una pressione valida E non abbiamo superato il limite giornaliero
       if ((s && s >= 130) || (d && d >= 85)) {
         if (todaysCount < 3) {
           actionToReturn = 'SET_TIMER_10_MIN';
-          console.log('askLisa: Pressione alta, timer attivato.');
-        } else {
-          console.log('askLisa: Pressione alta, ma limite giornaliero raggiunto. Niente timer.');
         }
       }
 
@@ -127,8 +119,6 @@ async function updateLongTermMemory(newMemory) {
   const currentNotes = profile.value?.piano_terapeutico || '';
   const today = new Date().toLocaleDateString();
   const updatedNotes = `${currentNotes}\n- [${today}] ${newMemory}`.trim();
-
-  console.log('updateLongTermMemory: Scrivo nel DB:', updatedNotes);
 
   const { error } = await supabase
     .from('profiles')
@@ -173,9 +163,7 @@ export async function analyzeExistingRecord(record) {
   }
 }
 
-//
-// --- FUNZIONE PER IL REPORT PDF (MEDICO) ---
-//
+// --- FUNZIONE PER IL REPORT PDF ---
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 
@@ -183,7 +171,6 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   let bpCount = 0, hrCount = 0;
   let maxSys = 0;
 
-  // --- 1. RACCOLTA DATI ECG ---
   const ecgRecords = vitalsData.filter(v => v.ecg_storage_path);
   let ecgSummaryText = "Nessun tracciato ECG registrato nel periodo.";
 
@@ -191,18 +178,15 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     const ecgDescriptions = ecgRecords.map(v => {
       const data = new Date(v.created_at).toLocaleDateString();
       let note = v.commento_lisa || "Nessuna analisi registrata";
-      // Pulizia disclaimer
       note = note.replace(/\*\*ATTENZIONE:.*professionale\.\*\*/s, "").trim();
       note = note.replace(/Sono una IA.*?medico\./s, "").trim();
       if (note.length > 1000) note = note.substring(0, 1000) + "...";
       return `- Data ${data}: ${note}`;
     }).join('\n\n');
-
     ecgSummaryText = `Sono presenti ${ecgRecords.length} tracciati ECG. Ecco le note di osservazione:\n${ecgDescriptions}`;
   }
 
   vitalsData.forEach(v => {
-    // Somma solo se i valori esistono (>0)
     if (v.pressione_sistolica && v.pressione_diastolica) {
       sysSum += v.pressione_sistolica;
       diaSum += v.pressione_diastolica;
@@ -233,18 +217,13 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     DATI PAZIENTE:
     Nome: ${profileData.nome}
     Età: ${profileData.data_di_nascita ? new Date().getFullYear() - new Date(profileData.data_di_nascita).getFullYear() : 'N/D'}
-
-    TERAPIA FARMACOLOGICA (Riferita):
-    ${profileData.terapia_farmacologica || 'Nessuna indicata'}
-
+    TERAPIA: ${profileData.terapia_farmacologica || 'Nessuna indicata'}
     STATISTICHE PERIODO (${stats.periodo}):
     Misurazioni totali: ${stats.totale_misurazioni}
     Media Pressione: ${stats.media_pa} mmHg
     Picco Sistolico: ${stats.picco_sistolico} mmHg
     Media Frequenza: ${stats.media_fc} bpm
-
-    REPORT TRACCIATI ECG:
-    ${ecgSummaryText}
+    REPORT TRACCIATI ECG: ${ecgSummaryText}
   `;
 
   try {
@@ -252,7 +231,6 @@ export async function generateClinicalSummary(profileData, vitalsData) {
       contents: [{ role: 'user', parts: [{ text: message }] }],
       systemInstruction: { parts: [{ text: DOCTOR_REPORT_PROMPT }] }
     });
-
     return result.response.text();
   } catch (error) {
     console.error("Errore generazione riassunto clinico:", error);
@@ -260,32 +238,20 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   }
 }
 
-// --- HELPER CONTEGGIO (FILTRO AUSCULTAZIONI) ---
+// --- HELPER CONTEGGIO ---
 async function getTodaysMeasurementCount(userId) {
   if (!userId) return 0;
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
   const { count, error } = await supabase
     .from('vital_signs')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
     .gte('created_at', today.toISOString())
-    .not('pressione_sistolica', 'is', null); // ESCLUDE le righe senza pressione
-
-  if (error) {
-    console.error('Errore conteggio giornaliero:', error);
-    return 0;
-  }
+    .not('pressione_sistolica', 'is', null);
+  if (error) return 0;
   return count || 0;
 }
-
-/**
- * ==============================================================================
- * FUNZIONI HELPER (Logica interna)
- * ==============================================================================
- */
 
 // --- HELPER ECG ---
 async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
@@ -308,7 +274,6 @@ async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
 
     try {
       const data = JSON.parse(cleanedText);
-      console.log('callGeminiForEcgAnalysis: Dati ECG Estratti:', data);
       return data;
     } catch (parseError) {
       console.error("Errore parsing JSON ECG:", parseError);
@@ -354,7 +319,6 @@ async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
     });
 
   if (!storageError) {
-    console.log(`uploadEcgAndSaveVitals: Immagine caricata: ${filePath}`);
     const { data: updatedRecord } = await supabase
       .from('vital_signs')
       .update({ ecg_storage_path: filePath })
@@ -363,7 +327,6 @@ async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
       .single();
     return updatedRecord;
   }
-
   return savedRecord;
 }
 
@@ -383,7 +346,6 @@ async function callGeminiForExtraction(userMessage) {
     const cleanedText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
     if (!cleanedText) return {};
     const data = JSON.parse(cleanedText)
-    console.log('callGeminiForExtraction: Dati Estratti:', data)
     return data
   } catch (error) {
     console.error("Errore bloccante in callGeminiForExtraction:", error)
@@ -397,10 +359,8 @@ async function saveExtractedVitals(data) {
   if (!userSession.value) return null;
   const userId = userSession.value.user.id;
 
-  // Logica "Solo Braccio"
   const isOnlyBraccio = data.braccio && !data.pressione_sistolica && !data.frequenza_cardiaca;
   if (isOnlyBraccio) {
-    console.log('saveExtractedVitals: Ricevuto solo braccio. Tento un aggiornamento...');
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: lastRecord, error: findError } = await supabase
       .from('vital_signs')
@@ -413,7 +373,6 @@ async function saveExtractedVitals(data) {
       .single();
 
     if (!findError && lastRecord) {
-      console.log(`saveExtractedVitals: Trovato record ${lastRecord.id}. Aggiorno...`);
       const { data: updatedData, error: updateError } = await supabase
         .from('vital_signs')
         .update({ braccio: data.braccio })
@@ -434,7 +393,6 @@ async function saveExtractedVitals(data) {
   };
 
   try {
-    console.log('saveExtractedVitals: Eseguo INSERT...', vitalData);
     const { data: savedData, error } = await supabase
       .from('vital_signs')
       .insert(vitalData)
@@ -448,6 +406,7 @@ async function saveExtractedVitals(data) {
   }
 }
 
+// --- HELPER SYSTEM INSTRUCTION (CON ORARI E MEMORIA) ---
 function buildSystemInstruction(mainPrompt, todaysCount = 0) {
   const p = profile.value || {};
   const nome = p.nome || 'Paziente';
@@ -464,6 +423,7 @@ CONTESTO PAZIENTE:
 - MISURAZIONI ODIERNE: ${todaysCount} (Se >= 3, evita di chiedere altre misurazioni di routine)
 `;
 
+  // Iniezione Terapia
   if (p.terapia_farmacologica && p.terapia_farmacologica.trim() !== '') {
     contestoProfilo += `
 *** TERAPIA FARMACOLOGICA IN ATTO ***
@@ -472,11 +432,23 @@ ${p.terapia_farmacologica}
 `;
   }
 
+  // Iniezione Memoria
   if (p.piano_terapeutico && p.piano_terapeutico.trim() !== '') {
     contestoProfilo += `
 *** MEMORIA A LUNGO TERMINE / NOTE ***
 ${p.piano_terapeutico}
 **************************************
+`;
+  }
+
+  // Iniezione Orari (Scheduler)
+  if (p.abilita_scheduler) {
+    contestoProfilo += `
+*** PIANO ORARIO MISURAZIONI ***
+- Mattina: ${p.orario_mattina || 'Non impostato'}
+- Pomeriggio: ${p.orario_pomeriggio || 'Non impostato'}
+- Sera: ${p.orario_sera || 'Non impostato'}
+********************************
 `;
   }
 
