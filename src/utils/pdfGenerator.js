@@ -1,5 +1,9 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+// --- IMPORT FIRMA ---
+// Assicurati che il file esista in src/assets/lisa_signature.png
+import signatureImg from '../assets/lisa_signature.png';
+// --------------------
 
 export async function downloadDoctorReport(profileData, vitalsData, clinicalSummary) {
   const doc = new jsPDF();
@@ -27,7 +31,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
   const nowStr = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
   processedSummary = processedSummary.replace('[Data e Ora corrente]', nowStr);
 
-  // CERCHIAMO IL SEGNALIBRO PER LA TABELLA (Inserito dal prompt)
+  // CERCHIAMO IL SEGNALIBRO PER LA TABELLA
   const splitMarker = "--- TABELLA DATI ---";
   let introText = "";
   let analysisText = processedSummary;
@@ -37,8 +41,8 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     introText = parts[0].trim();
     analysisText = parts[1].trim();
   } else {
-    // Fallback: se l'IA dimentica il marker, mettiamo tutto DOPO la tabella
-    introText = ""; // O una frase generica se preferisci
+    // Fallback se l'IA dimentica il marker
+    introText = "";
     analysisText = processedSummary;
   }
 
@@ -51,7 +55,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     const splitIntro = doc.splitTextToSize(introText, 180);
     doc.text(splitIntro, 14, currentY);
 
-    // Aggiorna Y in base all'altezza del testo (circa 5mm per riga) + margine
+    // Aggiorna Y
     currentY += (splitIntro.length * 5) + 5;
   }
 
@@ -85,10 +89,11 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
   // Aggiorna Y alla fine della tabella
   currentY = doc.lastAutoTable.finalY + 15;
 
-  // --- 4. COMMENTO ALLA VISITA / ANALISI (DOPO LA TABELLA) ---
+  // --- 4. COMMENTO ALLA VISITA + FIRMA (DOPO LA TABELLA) ---
   if (analysisText) {
     // Controllo cambio pagina se siamo troppo in basso
-    if (currentY > 250) {
+    // Lasciamo spazio sufficiente per testo + firma
+    if (currentY > 220) {
       doc.addPage();
       currentY = 20;
     }
@@ -97,21 +102,40 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     doc.setFontSize(11);
     doc.setTextColor(0);
 
-    // Pulizia base markdown residuo
     let cleanAnalysis = analysisText.replace(/\*\*/g, "").replace(/__/g, "");
-
     const splitAnalysis = doc.splitTextToSize(cleanAnalysis, 180);
+
     doc.text(splitAnalysis, 14, currentY);
+
+    // --- 5. LOGICA FIRMA ---
+    // Calcoliamo dove finisce il testo per posizionare la firma sopra il nome
+    const textHeight = splitAnalysis.length * 5;
+
+    // Calcolo dimensioni proporzionate (Originale: 211x66)
+    const originalWidth = 211;
+    const originalHeight = 66;
+    const targetWidth = 45; // Larghezza desiderata sul PDF in mm
+    const targetHeight = (originalHeight / originalWidth) * targetWidth; // Circa 14mm
+
+    // Posizioniamo la firma sopra le ultime righe del testo (dove c'è il nome)
+    // Saliamo di circa 20-25mm rispetto alla fine del testo per l'effetto sovrapposizione
+    const signatureY = currentY + textHeight - 22;
+
+    try {
+      doc.addImage(signatureImg, 'PNG', 14, signatureY, targetWidth, targetHeight);
+    } catch (e) {
+      console.error("Impossibile caricare immagine firma", e);
+    }
   }
 
-  // --- 5. FOOTER E NUMERI PAGINA ---
+  // --- 6. FOOTER ---
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(150);
 
-    const footerText = `Pagina ${i} di ${pageCount} - Generato da LisaSalute. Documento informativo di supporto, non sostituisce referto medico ufficiale.`;
+    const footerText = `Pagina ${i} di ${pageCount} - Generato da LisaSalute. Documento informativo di supporto.`;
 
     // Centra il footer
     const textWidth = doc.getStringUnitWidth(footerText) * doc.internal.getFontSize() / doc.internal.scaleFactor;
@@ -120,16 +144,14 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     doc.text(footerText, textOffset, 290);
   }
 
-  // --- 6. SALVATAGGIO FILE ---
+  // --- 7. SALVATAGGIO ---
   const now = new Date();
-  // Formato: YYYYMMDD_HHmm
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   const hour = String(now.getHours()).padStart(2, '0');
   const minute = String(now.getMinutes()).padStart(2, '0');
 
-  // Sanitizza il nome del paziente per il file
   const safeName = (profileData.nome || 'Paziente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
   const filename = `referto_${safeName}_${year}${month}${day}_${hour}${minute}.pdf`;
