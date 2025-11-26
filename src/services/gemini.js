@@ -10,11 +10,13 @@ import {
   DATA_EXTRACTION_PROMPT,
   NURSE_ANALYSIS_PROMPT,
   ECG_ANALYSIS_JSON_PROMPT,
-  DOCTOR_REPORT_PROMPT
+  DOCTOR_REPORT_PROMPT,
+  NURSE_GUIDE_PROMPT
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-const modelName = 'gemini-2.5-pro' // O 'gemini-2.5-pro' se hai accesso
+// Usiamo il modello Pro per massima affidabilità clinica
+const modelName = 'gemini-2.5-pro'
 
 const genAI = new GoogleGenerativeAI(apiKey)
 const model = genAI.getGenerativeModel({
@@ -41,8 +43,14 @@ export async function askLisa(userMessage, attachment = null) {
   let actionToReturn = null;
   let savedVitals = null;
 
+  // --- CONTEGGIO GIORNALIERO (FILTRATO) ---
+  // Conta solo le misurazioni con pressione valida, escludendo note o auscultazioni
+  const todaysCount = await getTodaysMeasurementCount(userSession.value?.user?.id);
+  console.log(`askLisa: Misurazioni PRESSORIE odierne trovate: ${todaysCount}`);
+  // ----------------------------------------
+
   try {
-    // --- FASE 1: ESTRAZIONE DATI + MEMORIA ---
+    // --- FASE 1: ESTRAZIONE DATI (SEMPRE ESEGUITA) ---
     console.log('askLisa: [FASE 1] Avvio estrazione dati...');
     const extractedData = await callGeminiForExtraction(userMessage);
     console.log('askLisa: [FASE 1] Estrazione completata.', extractedData);
@@ -55,40 +63,38 @@ export async function askLisa(userMessage, attachment = null) {
     }
 
     // --- FASE 2: LOGICA MULTIMODALE ---
-
     if (attachment && attachment.type === 'image') {
       // --- CASO ECG (IMMAGINE) ---
       console.log('askLisa: [FASE 2A] Avvio analisi ECG...');
-
       const ecgAnalysis = await callGeminiForEcgAnalysis(userMessage, attachment.data);
-
-      // Unisci i dati (se l'ECG ha rilevato BPM)
       extractedData.frequenza_cardiaca = ecgAnalysis.frequenza_cardiaca || extractedData.frequenza_cardiaca || null;
-
-      // Salva immagine e dati
       savedVitals = await uploadEcgAndSaveVitals(attachment.data, extractedData);
-
       lisaResponseText = ecgAnalysis.commento;
 
     } else {
       // --- CASO SOLO TESTO ---
       console.log('askLisa: [FASE 2B] Avvio analisi Testo...');
-
       savedVitals = await saveExtractedVitals(extractedData);
       console.log('askLisa: [FASE 2B] Dati DB salvati.', savedVitals);
 
       const s = extractedData.pressione_sistolica;
       const d = extractedData.pressione_diastolica;
-      // Trigger Timer: se pressione alta (>=130/85)
+
+      // --- LOGICA TIMER ---
+      // Attiva solo se c'è una pressione valida E non abbiamo superato il limite giornaliero
       if ((s && s >= 130) || (d && d >= 85)) {
-        actionToReturn = 'SET_TIMER_10_MIN';
+        if (todaysCount < 3) {
+          actionToReturn = 'SET_TIMER_10_MIN';
+          console.log('askLisa: Pressione alta, timer attivato.');
+        } else {
+          console.log('askLisa: Pressione alta, ma limite giornaliero raggiunto. Niente timer.');
+        }
       }
 
       const payload = {
         contents: buildChatHistory(userMessage),
-        systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT) }] },
+        systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount) }] },
       };
-
       lisaResponseText = await callGeminiApi(payload);
     }
 
@@ -196,7 +202,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   }
 
   vitalsData.forEach(v => {
-    // Somma solo se i valori esistono (>0) per evitare medie falsate
+    // Somma solo se i valori esistono (>0)
     if (v.pressione_sistolica && v.pressione_diastolica) {
       sysSum += v.pressione_sistolica;
       diaSum += v.pressione_diastolica;
@@ -209,7 +215,6 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     }
   });
 
-  // Calcolo medie sicuro
   const avgSys = bpCount > 0 ? Math.round(sysSum / bpCount) : 0;
   const avgDia = bpCount > 0 ? Math.round(diaSum / bpCount) : 0;
   const avgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : 0;
@@ -218,7 +223,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     media_pa: bpCount > 0 ? `${avgSys}/${avgDia}` : "N/D",
     media_fc: hrCount > 0 ? avgHr : "N/D",
     picco_sistolico: maxSys > 0 ? maxSys : "N/D",
-    totale_misurazioni: vitalsData.length,
+    totale_misurazioni: bpCount,
     periodo: vitalsData.length > 0
       ? `${new Date(vitalsData[vitalsData.length-1].created_at).toLocaleDateString()} - ${new Date(vitalsData[0].created_at).toLocaleDateString()}`
       : "N/D"
@@ -255,6 +260,26 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   }
 }
 
+// --- HELPER CONTEGGIO (FILTRO AUSCULTAZIONI) ---
+async function getTodaysMeasurementCount(userId) {
+  if (!userId) return 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { count, error } = await supabase
+    .from('vital_signs')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', today.toISOString())
+    .not('pressione_sistolica', 'is', null); // ESCLUDE le righe senza pressione
+
+  if (error) {
+    console.error('Errore conteggio giornaliero:', error);
+    return 0;
+  }
+  return count || 0;
+}
 
 /**
  * ==============================================================================
@@ -372,7 +397,7 @@ async function saveExtractedVitals(data) {
   if (!userSession.value) return null;
   const userId = userSession.value.user.id;
 
-  // Logica "Solo Braccio" (Merge)
+  // Logica "Solo Braccio"
   const isOnlyBraccio = data.braccio && !data.pressione_sistolica && !data.frequenza_cardiaca;
   if (isOnlyBraccio) {
     console.log('saveExtractedVitals: Ricevuto solo braccio. Tento un aggiornamento...');
@@ -423,7 +448,7 @@ async function saveExtractedVitals(data) {
   }
 }
 
-function buildSystemInstruction(mainPrompt) {
+function buildSystemInstruction(mainPrompt, todaysCount = 0) {
   const p = profile.value || {};
   const nome = p.nome || 'Paziente';
   const eta = p.data_di_nascita ?
@@ -436,6 +461,7 @@ CONTESTO PAZIENTE:
 - Età: ${eta}
 - Tipo Misuratore: ${p.tipo_misuratore || 'sconosciuto'}
 - Categorie Farmaci: ${p.farmaci_pressione ? 'Anti-Ipertensivi' : ''} ${p.farmaci_cuore ? 'Cardiaci' : ''} ${p.anticoagulanti ? 'Anticoagulanti' : ''}
+- MISURAZIONI ODIERNE: ${todaysCount} (Se >= 3, evita di chiedere altre misurazioni di routine)
 `;
 
   if (p.terapia_farmacologica && p.terapia_farmacologica.trim() !== '') {

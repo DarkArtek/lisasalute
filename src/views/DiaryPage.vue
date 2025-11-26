@@ -170,9 +170,9 @@ const handleExport = () => {
   exportCSV();
 };
 
-// --- LOGICA PDF ---
+// --- LOGICA PDF (CON FILTRO AUSCULTAZIONI) ---
 const handleDoctorReport = async () => {
-  // Recuperiamo TUTTI i dati, non solo quelli paginati
+  // Recuperiamo TUTTI i dati della giornata (filtrati per data nello store)
   let allReportData = [];
   const wasLoading = loading.value;
   loading.value = true;
@@ -193,8 +193,11 @@ const handleDoctorReport = async () => {
 
   // Controllo completezza giornaliera (Scheduler)
   const todayStr = new Date().toLocaleDateString();
+
+  // FIX: Contiamo solo i record con dati di pressione, escludendo note o auscultazioni pure
   const todaysMeasurements = allReportData.filter(v =>
-    new Date(v.created_at).toLocaleDateString() === todayStr
+    new Date(v.created_at).toLocaleDateString() === todayStr &&
+    v.pressione_sistolica != null
   ).length;
 
   let plannedCount = 0;
@@ -207,7 +210,7 @@ const handleDoctorReport = async () => {
   let confirmMessage = "Vuoi generare un report PDF completo per il tuo medico? Lisa scriverà una sintesi clinica dei dati visualizzati.";
 
   if (plannedCount > 0 && todaysMeasurements < plannedCount) {
-    confirmMessage = `ATTENZIONE: Oggi hai effettuato solo ${todaysMeasurements} misurazioni su ${plannedCount} previste. Il report giornaliero potrebbe essere incompleto.\n\nVuoi generarlo comunque?`;
+    confirmMessage = `ATTENZIONE: Oggi hai effettuato solo ${todaysMeasurements} misurazioni complete su ${plannedCount} previste. Il report giornaliero potrebbe essere incompleto.\n\nVuoi generarlo comunque?`;
   }
 
   if (!confirm(confirmMessage)) {
@@ -216,10 +219,11 @@ const handleDoctorReport = async () => {
   }
 
   try {
-    // 1. Genera la sintesi clinica con Gemini
+    // 1. Genera la sintesi clinica con Gemini (usa tutti i dati, anche auscultazioni, per il testo)
     const summary = await generateClinicalSummary(profile.value, allReportData);
 
     // 2. Genera e scarica il PDF
+    // Nota: pdfGenerator.js ha un filtro interno per non mostrare righe vuote nella tabella
     await downloadDoctorReport(profile.value, allReportData, summary);
 
   } catch (e) {
