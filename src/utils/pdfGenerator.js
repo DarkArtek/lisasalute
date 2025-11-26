@@ -25,25 +25,53 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
 
   let currentY = 40; // Punto di partenza verticale
 
+  // --- PREPARAZIONE DATI (FILTRO) ---
+  // FIX: Escludiamo i record che sono solo note/auscultazioni (senza pressione)
+  // Così la tabella non mostra righe vuote o parziali.
+  const validVitals = vitalsData.filter(v => v.pressione_sistolica != null);
+
   // --- PREPARAZIONE TESTO ---
-  // Sostituzione placeholder e pulizia
   let processedSummary = clinicalSummary || "";
   const nowStr = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
   processedSummary = processedSummary.replace('[Data e Ora corrente]', nowStr);
 
-  // CERCHIAMO IL SEGNALIBRO PER LA TABELLA
+  // --- LOGICA DI DIVISIONE TESTO (MIGLIORATA) ---
   const splitMarker = "--- TABELLA DATI ---";
+  const fallbackMarkers = ["Analisi del periodo:", "**Analisi del periodo:**", "Osservazioni:", "Commento alla visita:"];
+
   let introText = "";
   let analysisText = processedSummary;
 
   if (processedSummary.includes(splitMarker)) {
+    // Caso ideale: l'IA ha usato il marker
     const parts = processedSummary.split(splitMarker);
     introText = parts[0].trim();
     analysisText = parts[1].trim();
   } else {
-    // Fallback se l'IA dimentica il marker
-    introText = "";
-    analysisText = processedSummary;
+    // Fallback intelligente: cerca altri punti di rottura logici
+    let foundSplit = false;
+    for (const marker of fallbackMarkers) {
+      if (processedSummary.includes(marker)) {
+        const idx = processedSummary.indexOf(marker);
+        introText = processedSummary.substring(0, idx).trim();
+        analysisText = processedSummary.substring(idx).trim(); // Mantiene il titolo della sezione
+        foundSplit = true;
+        break;
+      }
+    }
+
+    // Fallback estremo: se non trova nulla, prova a prendere il primo paragrafo come intro
+    if (!foundSplit && processedSummary.length > 0) {
+      const paragraphs = processedSummary.split('\n\n');
+      if (paragraphs.length > 1) {
+        introText = paragraphs[0];
+        analysisText = paragraphs.slice(1).join('\n\n');
+      } else {
+        // Se è tutto un blocco unico, meglio metterlo dopo la tabella per sicurezza
+        introText = "";
+        analysisText = processedSummary;
+      }
+    }
   }
 
   // --- 2. NOTA INTRODUTTIVA (PRIMA DELLA TABELLA) ---
@@ -59,8 +87,8 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     currentY += (splitIntro.length * 5) + 5;
   }
 
-  // --- 3. TABELLA RILEVAZIONI ---
-  const tableData = vitalsData.map(v => [
+  // --- 3. TABELLA RILEVAZIONI (USANDO DATI FILTRATI) ---
+  const tableData = validVitals.map(v => [
     new Date(v.created_at).toLocaleString('it-IT', {
       day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute:'2-digit'
     }),
@@ -91,8 +119,7 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
 
   // --- 4. COMMENTO ALLA VISITA + FIRMA (DOPO LA TABELLA) ---
   if (analysisText) {
-    // Controllo cambio pagina se siamo troppo in basso
-    // Lasciamo spazio sufficiente per testo + firma
+    // Controllo cambio pagina
     if (currentY > 220) {
       doc.addPage();
       currentY = 20;
@@ -108,21 +135,20 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
     doc.text(splitAnalysis, 14, currentY);
 
     // --- 5. LOGICA FIRMA ---
-    // Calcoliamo dove finisce il testo per posizionare la firma sopra il nome
     const textHeight = splitAnalysis.length * 5;
 
-    // Calcolo dimensioni proporzionate (Originale: 211x66)
+    // Dimensioni
     const originalWidth = 211;
     const originalHeight = 66;
-    const targetWidth = 45; // Larghezza desiderata sul PDF in mm
-    const targetHeight = (originalHeight / originalWidth) * targetWidth; // Circa 14mm
+    const targetWidth = 45;
+    const targetHeight = (originalHeight / originalWidth) * targetWidth;
 
-    // Posizioniamo la firma sopra le ultime righe del testo (dove c'è il nome)
-    // Saliamo di circa 20-25mm rispetto alla fine del testo per l'effetto sovrapposizione
+    // Posizione Y (sovrapposta)
     const signatureY = currentY + textHeight - 22;
 
     try {
-      doc.addImage(signatureImg, 'PNG', 14, signatureY, targetWidth, targetHeight);
+      // FIX: Spostata a sinistra (X=10 invece di 14)
+      doc.addImage(signatureImg, 'PNG', 10, signatureY, targetWidth, targetHeight);
     } catch (e) {
       console.error("Impossibile caricare immagine firma", e);
     }
@@ -137,7 +163,6 @@ export async function downloadDoctorReport(profileData, vitalsData, clinicalSumm
 
     const footerText = `Pagina ${i} di ${pageCount} - Generato da LisaSalute. Documento informativo di supporto.`;
 
-    // Centra il footer
     const textWidth = doc.getStringUnitWidth(footerText) * doc.internal.getFontSize() / doc.internal.scaleFactor;
     const textOffset = (doc.internal.pageSize.width - textWidth) / 2;
 
