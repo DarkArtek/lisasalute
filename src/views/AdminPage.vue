@@ -7,6 +7,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
+      <!-- COLONNA SX: Form di Inserimento / Modifica -->
       <div class="lg:col-span-1">
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 sticky top-6">
           <h2 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-200">
@@ -25,15 +26,27 @@
             </div>
 
             <div class="grid grid-cols-1 gap-4">
+
+              <!-- CLASSE TERAPEUTICA DINAMICA -->
               <div>
                 <label class="label">Classe Terapeutica</label>
-                <select v-model="formData.classe_terapeutica" class="input-field">
-                  <option value="Antipertensivo">Antipertensivo</option>
-                  <option value="Antidiabetico">Antidiabetico</option>
-                  <option value="Antiaritmico">Antiaritmico</option>
-                  <option value="Anticoagulante">Anticoagulante</option>
-                  <option value="Altro">Altro</option>
+
+                <!-- Select esistente -->
+                <select v-model="selectedClass" class="input-field mb-2" @change="handleClassChange">
+                  <option disabled value="">Seleziona...</option>
+                  <option v-for="cls in existingClasses" :key="cls" :value="cls">{{ cls }}</option>
+                  <option value="__NEW__" class="font-bold text-red-500">+ Aggiungi Nuova...</option>
                 </select>
+
+                <!-- Input per nuova classe (visibile solo se selezionato __NEW__) -->
+                <input
+                  v-if="showNewClassInput"
+                  v-model="newClassInput"
+                  type="text"
+                  class="input-field border-red-300 focus:ring-red-500"
+                  placeholder="Scrivi nuova classe..."
+                  required
+                />
               </div>
 
               <div>
@@ -42,6 +55,7 @@
               </div>
             </div>
 
+            <!-- Bottoni Azione -->
             <div class="flex gap-2 pt-2">
               <button type="submit" :disabled="loading"
                       class="flex-1 py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-colors disabled:opacity-50">
@@ -61,9 +75,11 @@
         </div>
       </div>
 
+      <!-- COLONNA DX: Lista Farmaci -->
       <div class="lg:col-span-2">
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden flex flex-col h-[600px]">
 
+          <!-- Header Lista e Ricerca -->
           <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
             <h3 class="font-semibold text-lg">Catalogo Farmaci ({{ filteredDrugs.length }})</h3>
             <div class="relative w-64">
@@ -77,14 +93,15 @@
             </div>
           </div>
 
+          <!-- Tabella Scrollabile -->
           <div class="overflow-y-auto flex-1 p-0">
             <table class="w-full text-left border-collapse">
               <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
               <tr>
-                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-300 uppercase">Nome</th>
-                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-300 uppercase">Principio</th>
-                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Categoria</th>
-                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-300 uppercase text-center">Azioni</th>
+                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Nome</th>
+                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Principio</th>
+                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell">Categoria</th>
+                <th class="p-3 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase text-center">Azioni</th>
               </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -128,7 +145,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { supabase } from '../supabase';
 
 // Stati
@@ -141,18 +158,53 @@ const searchQuery = ref('');
 const isEditing = ref(false);
 const editingId = ref(null);
 
+// Logica per le Classi Terapeutiche Dinamiche
+const existingClasses = ref([]);
+const selectedClass = ref('');
+const showNewClassInput = ref(false);
+const newClassInput = ref('');
+
 // Form Data Iniziale
 const initialForm = {
   nome_commerciale: '',
   principio_attivo: '',
   categoria: '',
-  classe_terapeutica: 'Antipertensivo'
+  classe_terapeutica: ''
 };
 const formData = ref({ ...initialForm });
 
+// --- GESTIONE CLASSI DINAMICHE ---
+const extractClasses = (drugList) => {
+  const classes = new Set(drugList.map(d => d.classe_terapeutica).filter(c => c));
+  // Aggiungi sempre quelle base per sicurezza
+  classes.add("Antipertensivo");
+  classes.add("Antidiabetico");
+  classes.add("Antiaritmico");
+  classes.add("Anticoagulante");
+  classes.add("Altro");
+
+  existingClasses.value = Array.from(classes).sort();
+};
+
+const handleClassChange = () => {
+  if (selectedClass.value === '__NEW__') {
+    showNewClassInput.value = true;
+    formData.value.classe_terapeutica = ''; // Pulisce, aspetta l'input
+  } else {
+    showNewClassInput.value = false;
+    formData.value.classe_terapeutica = selectedClass.value;
+  }
+};
+
+// Sincronizza l'input manuale con il formData
+watch(newClassInput, (newVal) => {
+  if (showNewClassInput.value) {
+    formData.value.classe_terapeutica = newVal;
+  }
+});
+
 // --- GESTIONE DATI ---
 
-// 1. Carica lista farmaci
 const fetchDrugs = async () => {
   loadingList.value = true;
   try {
@@ -163,6 +215,10 @@ const fetchDrugs = async () => {
 
     if (fetchError) throw fetchError;
     drugs.value = data || [];
+
+    // Aggiorna la lista delle classi disponibili
+    extractClasses(drugs.value);
+
   } catch (err) {
     console.error(err);
   } finally {
@@ -170,7 +226,6 @@ const fetchDrugs = async () => {
   }
 };
 
-// 2. Computed per la ricerca
 const filteredDrugs = computed(() => {
   if (!searchQuery.value) return drugs.value;
   const q = searchQuery.value.toLowerCase();
@@ -181,15 +236,21 @@ const filteredDrugs = computed(() => {
   );
 });
 
-// 3. Salva o Aggiorna (Submit)
 const handleSubmit = async () => {
   loading.value = true;
   message.value = '';
   error.value = false;
 
+  // Validazione classe
+  if (showNewClassInput.value && !newClassInput.value.trim()) {
+    error.value = true;
+    message.value = "Inserisci il nome della nuova classe terapeutica.";
+    loading.value = false;
+    return;
+  }
+
   try {
     if (isEditing.value) {
-      // UPDATE
       const { error: updateError } = await supabase
         .from('drug_catalog')
         .update(formData.value)
@@ -198,7 +259,6 @@ const handleSubmit = async () => {
       if (updateError) throw updateError;
       message.value = 'Farmaco aggiornato!';
     } else {
-      // INSERT
       const { error: insertError } = await supabase
         .from('drug_catalog')
         .insert([formData.value]);
@@ -208,7 +268,7 @@ const handleSubmit = async () => {
     }
 
     resetForm();
-    await fetchDrugs(); // Ricarica la lista
+    await fetchDrugs();
 
   } catch (err) {
     console.error(err);
@@ -216,26 +276,31 @@ const handleSubmit = async () => {
     message.value = 'Errore: ' + err.message;
   } finally {
     loading.value = false;
-    // Pulisce il messaggio dopo 3 sec
     setTimeout(() => { message.value = '' }, 3000);
   }
 };
 
-// 4. Inizia Modifica
 const startEdit = (drug) => {
   isEditing.value = true;
   editingId.value = drug.id;
-  // Copia i dati nel form
-  formData.value = {
-    nome_commerciale: drug.nome_commerciale,
-    principio_attivo: drug.principio_attivo,
-    categoria: drug.categoria,
-    classe_terapeutica: drug.classe_terapeutica
-  };
-  window.scrollTo({ top: 0, behavior: 'smooth' }); // Torna su al form
+
+  formData.value = { ...drug };
+
+  // Imposta la select
+  if (existingClasses.value.includes(drug.classe_terapeutica)) {
+    selectedClass.value = drug.classe_terapeutica;
+    showNewClassInput.value = false;
+  } else {
+    // Caso raro: classe non in lista (non dovrebbe succedere se la lista è dinamica),
+    // oppure si vuole forzare "Nuova" per modificarla
+    selectedClass.value = '__NEW__';
+    showNewClassInput.value = true;
+    newClassInput.value = drug.classe_terapeutica;
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-// 5. Elimina
 const deleteDrug = async (id) => {
   if (!confirm("Sei sicuro di voler eliminare questo farmaco dal catalogo?")) return;
 
@@ -246,19 +311,20 @@ const deleteDrug = async (id) => {
       .eq('id', id);
 
     if (delError) throw delError;
-
-    // Rimuovi localmente per velocità
     drugs.value = drugs.value.filter(d => d.id !== id);
+    extractClasses(drugs.value); // Ricalcola classi dopo cancellazione
   } catch (err) {
     alert("Errore eliminazione: " + err.message);
   }
 };
 
-// 6. Reset
 const resetForm = () => {
   isEditing.value = false;
   editingId.value = null;
   formData.value = { ...initialForm };
+  selectedClass.value = '';
+  showNewClassInput.value = false;
+  newClassInput.value = '';
 };
 
 onMounted(() => {
