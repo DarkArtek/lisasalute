@@ -1,14 +1,15 @@
 import { ref, watchEffect } from 'vue'
 import { supabase } from '../supabase'
 import { userSession } from './auth.js'
-import { analyzeExistingRecord } from '../services/gemini.js'
+// Importiamo dalla nuova cartella services/gemini (prende index.js in automatico)
+import { analyzeExistingRecord } from '../services/gemini'
 import Papa from 'papaparse'
 
 /**
  * Gestisce lo stato del diario (tabella vital_signs)
  */
 
-export const vitals = ref([]) // I record della pagina corrente
+export const vitals = ref([]) // I record della pagina corrente (RECORD COMPLETI)
 export const ecgs = ref([])   // I record con ECG (per la galleria)
 export const chartVitals = ref([]) // I record per i grafici (ultimi 20)
 export const loading = ref(false)
@@ -18,7 +19,9 @@ export const recordsPerPage = 4 // Record per pagina
 export const batchProgress = ref(''); // Per la barra di stato
 
 /**
- * Carica i record dei parametri vitali in modo paginato per la tabella
+ * Carica i record dei parametri vitali in modo paginato per la tabella.
+ * FILTRO ATTIVO: Solo record che hanno la Pressione Sistolica valorizzata.
+ * Questo esclude automaticamente le analisi ECG pure (che hanno solo frequenza).
  */
 export async function fetchVitals() {
   if (!userSession.value) {
@@ -42,6 +45,7 @@ export async function fetchVitals() {
       .from('vital_signs')
       .select('*')
       .eq('user_id', userId)
+      .not('pressione_sistolica', 'is', null) // <--- FILTRO CHIAVE: Solo record con pressione
       .order('created_at', { ascending: false }) // Dal più recente al più vecchio
       .range(from, to) // PAGINAZIONE
 
@@ -62,7 +66,8 @@ export async function fetchVitals() {
 }
 
 /**
- * Carica gli ultimi 20 record validi per il grafico
+ * Carica gli ultimi 20 record validi per il grafico.
+ * NOTA: Qui includiamo tutto (anche ECG) purché abbia dati di pressione.
  */
 export async function fetchChartVitals() {
   if (!userSession.value) return;
@@ -86,6 +91,7 @@ export async function fetchEcgs() {
   if (!userSession.value) return;
   const userId = userSession.value.user.id;
   try {
+    loading.value = true; // Mostriamo loader anche per ECG
     const { data } = await supabase
       .from('vital_signs')
       .select('*')
@@ -93,14 +99,18 @@ export async function fetchEcgs() {
       .not('ecg_storage_path', 'is', null)
       .order('created_at', { ascending: false });
     ecgs.value = data || [];
-  } catch (err) { error.value = err.message; }
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    loading.value = false;
+  }
 }
 
 //
-// --- FUNZIONE MODIFICATA PER REPORT GIORNALIERO ---
+// --- FUNZIONE PER REPORT GIORNALIERO ---
 //
 /**
- * Recupera SOLO i parametri vitali DELLA GIORNATA CORRENTE per il report.
+ * Recupera TUTTI i parametri vitali DELLA GIORNATA CORRENTE per il report.
  */
 export async function fetchAllVitalsForReport() {
   if (!userSession.value) return [];
@@ -159,7 +169,7 @@ export async function requestAnalysis(record) {
     loading.value = true;
     error.value = null;
 
-    // 1. Chiama il motore (gemini.js) per avere il testo
+    // 1. Chiama il motore (gemini/index.js) per avere il testo
     const commento = await analyzeExistingRecord(record);
 
     // 2. Aggiorna il DB
@@ -168,9 +178,12 @@ export async function requestAnalysis(record) {
       .update({ commento_lisa: commento })
       .eq('id', record.id);
 
-    // 3. Ricarica i dati
-    await fetchVitals();
-    await fetchEcgs();
+    // 3. Ricarica SOLO la lista pertinente
+    if (record.ecg_storage_path) {
+      await fetchEcgs();
+    } else {
+      await fetchVitals();
+    }
 
   } catch (err) {
     console.error('Errore in requestAnalysis:', err.message);
@@ -183,6 +196,7 @@ export async function requestAnalysis(record) {
 
 /**
  * Analizza TUTTI i record nel DB che non hanno un commento.
+ * (Solo quelli testuali, per ora)
  */
 export async function batchAnalyzeRecords() {
   if (!userSession.value) {
@@ -225,6 +239,7 @@ export async function batchAnalyzeRecords() {
         .update({ commento_lisa: commento })
         .eq('id', record.id);
 
+      // Piccolo delay per non intasare le chiamate
       await new Promise(res => setTimeout(res, 500));
     }
 

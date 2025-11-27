@@ -13,7 +13,7 @@
       <div v-if="error" class="p-3 bg-red-100 text-red-700 rounded-lg"><p><strong>Errore:</strong> {{ error }}</p></div>
       <div v-if="!loading && messages.length === 0" class="text-center text-gray-500 py-10">
         <font-awesome-icon icon="comment-dots" class="text-4xl mb-3" />
-        <p>Inizia la tua conversazione con Lisa.</p>
+        <p>Inizia la tua conversazione con la dottoressa.</p>
       </div>
       <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
       <div v-if="lisaIsTyping" class="flex justify-start">
@@ -48,7 +48,7 @@ import { ref, onMounted } from 'vue'
 import { messages, loading, error, addMessage, clearChatHistory, setReminder, scrollToBottom } from '../store/chat.js'
 import ChatMessage from '../components/ChatMessage.vue'
 import Loader from '../components/Loader.vue'
-import { askLisa } from '../services/gemini.js'
+import { askLisa } from '../services/gemini'
 
 const newMessage = ref('')
 const lisaIsTyping = ref(false)

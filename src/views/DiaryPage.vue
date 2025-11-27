@@ -131,7 +131,7 @@ import {
 } from '../store/diary.js';
 
 // --- IMPORT NECESSARI PER PDF ---
-import { generateClinicalSummary } from '../services/gemini.js';
+import { generateClinicalSummary } from '../services/gemini/';
 import { downloadDoctorReport } from '../utils/pdfGenerator.js';
 import { profile } from '../store/profile.js';
 // ------------------------------
