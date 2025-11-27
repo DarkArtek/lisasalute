@@ -5,9 +5,10 @@ import ChatPage from './views/ChatPage.vue'
 import DiaryPage from './views/DiaryPage.vue'
 import ChartPage from './views/ChartPage.vue'
 import EcgPage from './views/EcgPage.vue'
+import EcgDetailPage from './views/EcgDetailPage.vue' // <-- NUOVO COMPONENTE
 import ProfilePage from './views/ProfilePage.vue'
 import AuthPage from './views/AuthPage.vue'
-import AdminPage from './views/AdminPage.vue' // <-- Pagina Admin
+import AdminPage from './views/AdminPage.vue'
 
 import { supabase } from './supabase.js'
 import { userSession } from './store/auth.js'
@@ -42,13 +43,20 @@ const routes = [
     component: EcgPage,
     meta: { requiresAuth: true }
   },
+  // --- NUOVA ROTTA DETTAGLIO ECG ---
+  {
+    path: '/ecg/:id',
+    name: 'EcgDetail',
+    component: EcgDetailPage,
+    meta: { requiresAuth: true }
+  },
+  // -------------------------------
   {
     path: '/profilo',
     name: 'Profilo',
     component: ProfilePage,
     meta: { requiresAuth: true }
   },
-  // --- ROTTA ADMIN ---
   {
     path: '/admin',
     name: 'Admin',
@@ -62,12 +70,10 @@ const router = createRouter({
   routes,
 })
 
-// GUARDIANO DI SICUREZZA (Navigation Guard)
+// GUARDIANO DI SICUREZZA
 router.beforeEach(async (to, from, next) => {
-  // Recuperiamo la sessione corrente da Supabase
   const { data: { session } } = await supabase.auth.getSession()
 
-  // Aggiorniamo lo store se necessario
   if (!userSession.value) {
     userSession.value = session
   }
@@ -76,15 +82,12 @@ router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin)
 
-  // 1. Se serve auth ma non sei loggato -> Vai a Auth
   if (requiresAuth && !isAuthenticated) {
     next({ name: 'Auth' })
     return
   }
 
-  // 2. Controllo specifico per ADMIN
   if (requiresAdmin && isAuthenticated) {
-    // Verifichiamo nel DB se l'utente ha il flag is_admin
     const { data: profile } = await supabase
       .from('profiles')
       .select('is_admin')
@@ -92,36 +95,26 @@ router.beforeEach(async (to, from, next) => {
       .single();
 
     if (!profile || !profile.is_admin) {
-      console.warn('Tentativo accesso admin non autorizzato');
-      next({ name: 'Chat' }) // Rispedisci alla home
+      next({ name: 'Chat' })
       return
     }
   }
 
-  // 3. Se sei loggato e provi ad andare su Auth -> Vai a Chat
   if (to.name === 'Auth' && isAuthenticated) {
     next({ name: 'Chat' })
     return
   }
 
-  // Altrimenti procedi
   next()
 })
 
-// GESTIONE REATTIVA LOGIN/LOGOUT
 supabase.auth.onAuthStateChange((_event, session) => {
   userSession.value = session
-
-  // Otteniamo la rotta corrente in modo sicuro
   const currentRoute = router.currentRoute.value
 
-  // Caso 1: Logout (sessione persa) mentre si è in una pagina protetta -> Vai a Login
   if (!session && currentRoute.meta.requiresAuth) {
     router.push({ name: 'Auth' })
   }
-
-  // Caso 2: Login (sessione acquisita) mentre si è nella pagina di Login -> Vai a Chat
-  // (Questo è il fix per il problema del refresh)
   if (session && currentRoute.name === 'Auth') {
     router.push({ name: 'Chat' })
   }

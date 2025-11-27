@@ -10,12 +10,11 @@ import {
   DATA_EXTRACTION_PROMPT,
   NURSE_ANALYSIS_PROMPT,
   ECG_ANALYSIS_JSON_PROMPT,
-  DOCTOR_REPORT_PROMPT,
-  NURSE_GUIDE_PROMPT
+  DOCTOR_REPORT_PROMPT
 } from '../prompts'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-const modelName = 'gemini-2.5-pro'
+const modelName = 'gemini-2.5-pro' // Usa un modello multimodale (flash o pro)
 
 const genAI = new GoogleGenerativeAI(apiKey)
 const model = genAI.getGenerativeModel({
@@ -27,7 +26,6 @@ const model = genAI.getGenerativeModel({
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
   ],
 })
-
 
 /**
  * ==============================================================================
@@ -62,9 +60,16 @@ export async function askLisa(userMessage, attachment = null) {
     if (attachment && attachment.type === 'image') {
       // --- CASO ECG (IMMAGINE) ---
       console.log('askLisa: [FASE 2A] Avvio analisi ECG...');
+
+      // 1. Analisi con Gemini (usa il Base64 per velocità)
       const ecgAnalysis = await callGeminiForEcgAnalysis(userMessage, attachment.data);
+
+      // Uniamo i dati estratti
       extractedData.frequenza_cardiaca = ecgAnalysis.frequenza_cardiaca || extractedData.frequenza_cardiaca || null;
-      savedVitals = await uploadEcgAndSaveVitals(attachment.data, extractedData);
+
+      // 2. Upload Sicuro (usa il File originale per integrità)
+      savedVitals = await uploadEcgAndSaveVitals(attachment.file, extractedData);
+
       lisaResponseText = ecgAnalysis.commento;
 
     } else {
@@ -111,7 +116,91 @@ export async function askLisa(userMessage, attachment = null) {
   }
 }
 
-// --- FUNZIONE AGGIORNAMENTO MEMORIA ---
+// --- HELPER ECG ANALYSIS (Usa Base64) ---
+async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
+  const extractionModel = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction: { parts: [{ text: ECG_ANALYSIS_JSON_PROMPT }] }
+  })
+
+  try {
+    console.log('callGeminiForEcgAnalysis: Chiamo API per JSON ECG...');
+    const result = await extractionModel.generateContent([
+      userMessage || "Analizza questo tracciato.",
+      { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
+    ]);
+    const response = result.response;
+    const jsonText = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+
+    if (!jsonText) return { frequenza_cardiaca: null, commento: "Non sono riuscita a leggere il tracciato." };
+
+    try {
+      const data = JSON.parse(jsonText);
+      return data;
+    } catch (parseError) {
+      console.error("Errore parsing JSON ECG:", parseError);
+      return { frequenza_cardiaca: null, commento: jsonText };
+    }
+  } catch (apiError) {
+    console.error("Errore bloccante (API) in callGeminiForEcgAnalysis:", apiError);
+    throw apiError;
+  }
+}
+
+// --- HELPER UPLOAD ECG (Usa File Object) ---
+async function uploadEcgAndSaveVitals(fileObject, extractedData) {
+  if (!userSession.value) throw new Error('Utente non loggato');
+  const userId = userSession.value.user.id;
+
+  // 1. Inseriamo il record nel DB (senza path per ora)
+  const vitalData = {
+    user_id: userId,
+    pressione_sistolica: extractedData.pressione_sistolica || null,
+    pressione_diastolica: extractedData.pressione_diastolica || null,
+    frequenza_cardiaca: extractedData.frequenza_cardiaca || null,
+    saturazione_ossigeno: extractedData.saturazione_ossigeno || null,
+    braccio: extractedData.braccio || null,
+    commento_lisa: 'Analisi ECG in corso...'
+  };
+
+  const { data: savedRecord, error: insertError } = await supabase
+    .from('vital_signs')
+    .insert(vitalData)
+    .select()
+    .single();
+
+  if (insertError) throw insertError;
+
+  // 2. Carichiamo il FILE ORIGINALE su Supabase Storage
+  // Nome file univoco: userId/ecg_RECORDID.jpg
+  const filePath = `${userId}/ecg_${savedRecord.id}.jpg`;
+
+  const { error: storageError } = await supabase
+    .storage
+    .from('ecg_uploads') // Assicurati che il bucket si chiami così!
+    .upload(filePath, fileObject, {
+      contentType: fileObject.type || 'image/jpeg',
+      upsert: true
+    });
+
+  if (!storageError) {
+    // 3. Se l'upload va a buon fine, aggiorniamo il record con il percorso
+    const { data: updatedRecord } = await supabase
+      .from('vital_signs')
+      .update({ ecg_storage_path: filePath })
+      .eq('id', savedRecord.id)
+      .select()
+      .single();
+    return updatedRecord;
+  } else {
+    console.error("Errore Upload Storage:", storageError);
+    // Ritorniamo il record comunque, anche se l'immagine ha fallito
+    return savedRecord;
+  }
+}
+
+// --- ALTRE FUNZIONI HELPER ---
+
 async function updateLongTermMemory(newMemory) {
   if (!userSession.value) return;
   const userId = userSession.value.user.id;
@@ -163,7 +252,7 @@ export async function analyzeExistingRecord(record) {
   }
 }
 
-// --- FUNZIONE PER IL REPORT PDF ---
+// --- REPORT PDF ---
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 
@@ -238,7 +327,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
   }
 }
 
-// --- HELPER CONTEGGIO ---
+// --- HELPERS ---
 async function getTodaysMeasurementCount(userId) {
   if (!userId) return 0;
   const today = new Date();
@@ -253,84 +342,6 @@ async function getTodaysMeasurementCount(userId) {
   return count || 0;
 }
 
-// --- HELPER ECG ---
-async function callGeminiForEcgAnalysis(userMessage, imageBase64) {
-  const extractionModel = genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction: { parts: [{ text: ECG_ANALYSIS_JSON_PROMPT }] }
-  })
-
-  try {
-    console.log('callGeminiForEcgAnalysis: Chiamo API per JSON ECG...');
-    const result = await extractionModel.generateContent([
-      userMessage || "Analizza questo tracciato.",
-      { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
-    ]);
-    const response = result.response;
-    const jsonText = response.text();
-    const cleanedText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    if (!cleanedText) return { frequenza_cardiaca: null, commento: "Non sono riuscita a leggere il tracciato." };
-
-    try {
-      const data = JSON.parse(cleanedText);
-      return data;
-    } catch (parseError) {
-      console.error("Errore parsing JSON ECG:", parseError);
-      return { frequenza_cardiaca: null, commento: cleanedText };
-    }
-  } catch (apiError) {
-    console.error("Errore bloccante (API) in callGeminiForEcgAnalysis:", apiError);
-    throw apiError;
-  }
-}
-
-// --- HELPER UPLOAD ECG ---
-async function uploadEcgAndSaveVitals(imageBase64, extractedData) {
-  if (!userSession.value) throw new Error('Utente non loggato');
-  const userId = userSession.value.user.id;
-
-  const vitalData = {
-    user_id: userId,
-    pressione_sistolica: extractedData.pressione_sistolica || null,
-    pressione_diastolica: extractedData.pressione_diastolica || null,
-    frequenza_cardiaca: extractedData.frequenza_cardiaca || null,
-    saturazione_ossigeno: extractedData.saturazione_ossigeno || null,
-    braccio: extractedData.braccio || null,
-    commento_lisa: 'Analisi ECG in corso...'
-  };
-
-  const { data: savedRecord, error: insertError } = await supabase
-    .from('vital_signs')
-    .insert(vitalData)
-    .select()
-    .single();
-
-  if (insertError) throw insertError;
-
-  const filePath = `${userId}/ecg_${savedRecord.id}.jpg`;
-  const { error: storageError } = await supabase
-    .storage
-    .from('ecg_uploads')
-    .upload(filePath, imageBase64, {
-      contentType: 'image/jpeg',
-      upsert: false,
-      encoding: 'base64'
-    });
-
-  if (!storageError) {
-    const { data: updatedRecord } = await supabase
-      .from('vital_signs')
-      .update({ ecg_storage_path: filePath })
-      .eq('id', savedRecord.id)
-      .select()
-      .single();
-    return updatedRecord;
-  }
-  return savedRecord;
-}
-
-// --- HELPER ESTRAZIONE ---
 async function callGeminiForExtraction(userMessage) {
   if (!userMessage.trim()) return {};
   const extractionModel = genAI.getGenerativeModel({
@@ -353,12 +364,12 @@ async function callGeminiForExtraction(userMessage) {
   }
 }
 
-// --- HELPER SALVATAGGIO VITALS ---
 async function saveExtractedVitals(data) {
   if (!data || Object.keys(data).length === 0) return null;
   if (!userSession.value) return null;
   const userId = userSession.value.user.id;
 
+  // Logica aggiornamento Braccio
   const isOnlyBraccio = data.braccio && !data.pressione_sistolica && !data.frequenza_cardiaca;
   if (isOnlyBraccio) {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -406,7 +417,6 @@ async function saveExtractedVitals(data) {
   }
 }
 
-// --- HELPER SYSTEM INSTRUCTION (CON ORARI E MEMORIA) ---
 function buildSystemInstruction(mainPrompt, todaysCount = 0) {
   const p = profile.value || {};
   const nome = p.nome || 'Paziente';
@@ -423,7 +433,6 @@ CONTESTO PAZIENTE:
 - MISURAZIONI ODIERNE: ${todaysCount} (Se >= 3, evita di chiedere altre misurazioni di routine)
 `;
 
-  // Iniezione Terapia
   if (p.terapia_farmacologica && p.terapia_farmacologica.trim() !== '') {
     contestoProfilo += `
 *** TERAPIA FARMACOLOGICA IN ATTO ***
@@ -432,7 +441,6 @@ ${p.terapia_farmacologica}
 `;
   }
 
-  // Iniezione Memoria
   if (p.piano_terapeutico && p.piano_terapeutico.trim() !== '') {
     contestoProfilo += `
 *** MEMORIA A LUNGO TERMINE / NOTE ***
@@ -441,7 +449,6 @@ ${p.piano_terapeutico}
 `;
   }
 
-  // Iniezione Orari (Scheduler)
   if (p.abilita_scheduler) {
     contestoProfilo += `
 *** PIANO ORARIO MISURAZIONI ***
