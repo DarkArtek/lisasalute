@@ -7,7 +7,7 @@ import ChartPage from './views/ChartPage.vue'
 import EcgPage from './views/EcgPage.vue'
 import ProfilePage from './views/ProfilePage.vue'
 import AuthPage from './views/AuthPage.vue'
-import AdminPage from './views/AdminPage.vue' // <-- NUOVO IMPORT
+import AdminPage from './views/AdminPage.vue' // <-- Pagina Admin
 
 import { supabase } from './supabase.js'
 import { userSession } from './store/auth.js'
@@ -48,12 +48,12 @@ const routes = [
     component: ProfilePage,
     meta: { requiresAuth: true }
   },
-  // --- NUOVA ROTTA ADMIN ---
+  // --- ROTTA ADMIN ---
   {
     path: '/admin',
     name: 'Admin',
     component: AdminPage,
-    meta: { requiresAuth: true, requiresAdmin: true } // <-- Flag speciale
+    meta: { requiresAuth: true, requiresAdmin: true }
   },
 ]
 
@@ -62,10 +62,12 @@ const router = createRouter({
   routes,
 })
 
-// GUARDIANO DI SICUREZZA
+// GUARDIANO DI SICUREZZA (Navigation Guard)
 router.beforeEach(async (to, from, next) => {
+  // Recuperiamo la sessione corrente da Supabase
   const { data: { session } } = await supabase.auth.getSession()
 
+  // Aggiorniamo lo store se necessario
   if (!userSession.value) {
     userSession.value = session
   }
@@ -74,14 +76,15 @@ router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin)
 
+  // 1. Se serve auth ma non sei loggato -> Vai a Auth
   if (requiresAuth && !isAuthenticated) {
     next({ name: 'Auth' })
     return
   }
 
-  // --- CONTROLLO ADMIN ---
+  // 2. Controllo specifico per ADMIN
   if (requiresAdmin && isAuthenticated) {
-    // Facciamo una query di sicurezza per essere certi che sia admin
+    // Verifichiamo nel DB se l'utente ha il flag is_admin
     const { data: profile } = await supabase
       .from('profiles')
       .select('is_admin')
@@ -89,26 +92,38 @@ router.beforeEach(async (to, from, next) => {
       .single();
 
     if (!profile || !profile.is_admin) {
-      // Se non è admin, rispediscilo alla chat
       console.warn('Tentativo accesso admin non autorizzato');
-      next({ name: 'Chat' })
+      next({ name: 'Chat' }) // Rispedisci alla home
       return
     }
   }
-  // ---------------------
 
+  // 3. Se sei loggato e provi ad andare su Auth -> Vai a Chat
   if (to.name === 'Auth' && isAuthenticated) {
     next({ name: 'Chat' })
     return
   }
 
+  // Altrimenti procedi
   next()
 })
 
+// GESTIONE REATTIVA LOGIN/LOGOUT
 supabase.auth.onAuthStateChange((_event, session) => {
   userSession.value = session
-  if (!session && router.currentRoute.value.meta.requiresAuth) {
+
+  // Otteniamo la rotta corrente in modo sicuro
+  const currentRoute = router.currentRoute.value
+
+  // Caso 1: Logout (sessione persa) mentre si è in una pagina protetta -> Vai a Login
+  if (!session && currentRoute.meta.requiresAuth) {
     router.push({ name: 'Auth' })
+  }
+
+  // Caso 2: Login (sessione acquisita) mentre si è nella pagina di Login -> Vai a Chat
+  // (Questo è il fix per il problema del refresh)
+  if (session && currentRoute.name === 'Auth') {
+    router.push({ name: 'Chat' })
   }
 })
 
