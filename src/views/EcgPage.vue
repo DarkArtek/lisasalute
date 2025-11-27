@@ -96,7 +96,7 @@ const generateSignedUrls = async (records) => {
   const promises = records.map(async (record) => {
     if (!record.ecg_storage_path) return { ...record, signedUrl: null };
 
-    // --- NOTA: Assicurati che il nome del bucket sia corretto ('ecg_uploads' vs 'ecg_files') ---
+    // Richiede il bucket 'ecg_uploads' come da config
     const { data, error } = await supabase
       .storage
       .from('ecg_uploads')
@@ -117,7 +117,7 @@ onMounted(async () => {
   await fetchEcgs();
 });
 
-// Osserva cambiamenti nello store (es. dopo il caricamento iniziale)
+// Osserva cambiamenti nello store
 watch(ecgs, (newEcgs) => {
   generateSignedUrls(newEcgs);
 });

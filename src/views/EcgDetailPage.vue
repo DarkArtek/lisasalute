@@ -26,7 +26,7 @@
         </div>
       </div>
 
-      <div class="bg-black p-4 flex justify-center min-h-[300px]">
+      <div class="bg-transparent p-4 flex justify-center min-h-[300px]">
         <img
           v-if="signedUrl"
           :src="signedUrl"
@@ -106,7 +106,7 @@ const fetchRecord = async () => {
     if (data.ecg_storage_path) {
       const { data: urlData, error: urlError } = await supabase
         .storage
-        .from('ecg_uploads') // Controlla sempre che il nome bucket coincida
+        .from('ecg_uploads')
         .createSignedUrl(data.ecg_storage_path, 3600);
 
       if (!urlError) {
