@@ -2,17 +2,10 @@ import { ref, watchEffect } from 'vue'
 import { supabase } from '../supabase'
 import { userSession } from './auth.js'
 
-/**
- * Gestisce lo stato del profilo medico dell'utente.
- */
-
 export const profile = ref(null)
 export const loading = ref(false)
 export const error = ref(null)
 
-/**
- * Carica il profilo dell'utente loggato dalla tabella 'profiles'.
- */
 export async function fetchProfile() {
   if (!userSession.value) {
     profile.value = null;
@@ -25,7 +18,6 @@ export async function fetchProfile() {
     loading.value = true
     error.value = null
 
-    // 1. Chiediamo a Supabase il profilo
     const { data, error: fetchError } = await supabase
       .from('profiles')
       .select('*')
@@ -33,16 +25,12 @@ export async function fetchProfile() {
       .single()
 
     if (fetchError && fetchError.code !== 'PGRST116') {
-      // PGRST116 = "nessuna riga trovata", non è un errore bloccante
       throw fetchError
     }
 
     if (data) {
-      // 2. Profilo trovato, lo salviamo nello store
       profile.value = data
     } else {
-      // 3. Nessun profilo trovato (es. primo login)
-      // Inizializziamo un profilo vuoto con i valori di default
       profile.value = {
         id: userId,
         nome: '',
@@ -52,14 +40,16 @@ export async function fetchProfile() {
         farmaci_pressione: false,
         farmaci_cuore: false,
         anticoagulanti: false,
-        // Campi di memoria e terapia
         piano_terapeutico: '',
         terapia_farmacologica: '',
-        // Campi Scheduler (default attivi)
+        modalita_soccorritore: false,
         orario_mattina: '08:00',
         orario_pomeriggio: '14:00',
         orario_sera: '20:00',
-        abilita_scheduler: true
+        abilita_scheduler: true,
+        // --- NUOVO CAMPO ---
+        is_admin: false
+        // -------------------
       }
     }
 
@@ -71,15 +61,14 @@ export async function fetchProfile() {
   }
 }
 
-/**
- * Aggiorna (o crea) il profilo dell'utente loggato.
- */
 export async function updateProfile(profileData) {
   if (!userSession.value) return;
 
+  // Nota: non permettiamo di aggiornare 'is_admin' da qui per sicurezza,
+  // quello si cambia solo da DB.
   const updateData = {
     ...profileData,
-    id: userSession.value.user.id, // Forza l'ID dell'utente loggato
+    id: userSession.value.user.id,
     updated_at: new Date()
   };
 
@@ -93,7 +82,6 @@ export async function updateProfile(profileData) {
 
     if (upsertError) throw upsertError
 
-    // Aggiorniamo lo stato locale con i dati salvati
     profile.value = updateData
 
   } catch (err) {
@@ -105,7 +93,6 @@ export async function updateProfile(profileData) {
   }
 }
 
-// Watcher: Se l'utente cambia (login/logout), ricarica il profilo.
 watchEffect(() => {
   fetchProfile();
 });

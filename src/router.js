@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// Importiamo i componenti delle viste (pagine)
+// Importiamo i componenti delle viste
 import ChatPage from './views/ChatPage.vue'
 import DiaryPage from './views/DiaryPage.vue'
-import ChartPage from './views/ChartPage.vue' // <-- NUOVA PAGINA
+import ChartPage from './views/ChartPage.vue'
+import EcgPage from './views/EcgPage.vue'
 import ProfilePage from './views/ProfilePage.vue'
 import AuthPage from './views/AuthPage.vue'
+import AdminPage from './views/AdminPage.vue' // <-- NUOVO IMPORT
 
 import { supabase } from './supabase.js'
 import { userSession } from './store/auth.js'
@@ -28,19 +30,30 @@ const routes = [
     component: DiaryPage,
     meta: { requiresAuth: true }
   },
-  // --- NUOVA ROTTA GRAFICI ---
   {
     path: '/grafici',
     name: 'Grafici',
     component: ChartPage,
     meta: { requiresAuth: true }
   },
-  // --------------------------
+  {
+    path: '/ecg',
+    name: 'EcgGallery',
+    component: EcgPage,
+    meta: { requiresAuth: true }
+  },
   {
     path: '/profilo',
     name: 'Profilo',
     component: ProfilePage,
     meta: { requiresAuth: true }
+  },
+  // --- NUOVA ROTTA ADMIN ---
+  {
+    path: '/admin',
+    name: 'Admin',
+    component: AdminPage,
+    meta: { requiresAuth: true, requiresAdmin: true } // <-- Flag speciale
   },
 ]
 
@@ -49,7 +62,7 @@ const router = createRouter({
   routes,
 })
 
-// "GUARDIANO" DI SICUREZZA (Navigation Guard)
+// GUARDIANO DI SICUREZZA
 router.beforeEach(async (to, from, next) => {
   const { data: { session } } = await supabase.auth.getSession()
 
@@ -57,35 +70,45 @@ router.beforeEach(async (to, from, next) => {
     userSession.value = session
   }
 
+  const isAuthenticated = !!session;
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
-  const isAuthenticated = userSession.value && userSession.value.user
+  const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin)
 
   if (requiresAuth && !isAuthenticated) {
-    console.log('Accesso non autorizzato, reindirizzo a /auth');
     next({ name: 'Auth' })
-  } else if (to.name === 'Auth' && isAuthenticated) {
-    console.log('Utente già loggato, reindirizzo a /');
-    next({ name: 'Chat' })
-  } else {
-    next()
+    return
   }
+
+  // --- CONTROLLO ADMIN ---
+  if (requiresAdmin && isAuthenticated) {
+    // Facciamo una query di sicurezza per essere certi che sia admin
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', session.user.id)
+      .single();
+
+    if (!profile || !profile.is_admin) {
+      // Se non è admin, rispediscilo alla chat
+      console.warn('Tentativo accesso admin non autorizzato');
+      next({ name: 'Chat' })
+      return
+    }
+  }
+  // ---------------------
+
+  if (to.name === 'Auth' && isAuthenticated) {
+    next({ name: 'Chat' })
+    return
+  }
+
+  next()
 })
 
-// Gestiamo i cambiamenti di stato (login/logout) in modo reattivo
 supabase.auth.onAuthStateChange((_event, session) => {
   userSession.value = session
-
-  const currentMeta = router.currentRoute.value.meta
-  const isCurrentlyOnProtectedRoute = currentMeta && currentMeta.requiresAuth
-
-  if (!session && isCurrentlyOnProtectedRoute) {
-    console.log('Sessione scaduta, reindirizzo a /auth');
+  if (!session && router.currentRoute.value.meta.requiresAuth) {
     router.push({ name: 'Auth' })
-  }
-
-  if (session && router.currentRoute.value.name === 'Auth') {
-    console.log('Sessione attiva, reindirizzo da /auth a /');
-    router.push({ name: 'Chat' })
   }
 })
 
