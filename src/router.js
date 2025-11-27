@@ -6,12 +6,14 @@ import DiaryPage from './views/DiaryPage.vue'
 import ChartPage from './views/ChartPage.vue'
 import EcgPage from './views/EcgPage.vue'
 import EcgDetailPage from './views/EcgDetailPage.vue' // <-- NUOVO COMPONENTE
+import EcgUploadPage from "./views/EcgUploadPage.vue";
 import ProfilePage from './views/ProfilePage.vue'
 import AuthPage from './views/AuthPage.vue'
 import AdminPage from './views/AdminPage.vue'
 
 import { supabase } from './supabase.js'
 import { userSession } from './store/auth.js'
+
 
 const routes = [
   {
@@ -41,6 +43,12 @@ const routes = [
     path: '/ecg',
     name: 'EcgGallery',
     component: EcgPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/ecg/upload', // <--- NUOVA ROTTA
+    name: 'EcgUpload',
+    component: EcgUploadPage,
     meta: { requiresAuth: true }
   },
   // --- NUOVA ROTTA DETTAGLIO ECG ---

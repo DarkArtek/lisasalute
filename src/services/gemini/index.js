@@ -38,7 +38,7 @@ export async function askLisa(userMessage, attachment = null) {
   const todaysCount = await getTodaysMeasurementCount(userId);
 
   try {
-    // 1. Estrazione Dati
+    // 1. Estrazione Dati (inclusa la data storica)
     const extractedData = await callGeminiForExtraction(userMessage);
 
     if (extractedData.nuova_memoria) {
@@ -56,6 +56,7 @@ export async function askLisa(userMessage, attachment = null) {
       let previousEcgText = "Nessun tracciato precedente.";
       if (lastEcg) {
         const date = new Date(lastEcg.created_at).toLocaleDateString('it-IT');
+        // Usiamo il commento salvato (che ora sarà quello tecnico) per il confronto
         previousEcgText = `DEL ${date}: "${lastEcg.commento_lisa}"`;
       }
 
@@ -64,14 +65,19 @@ export async function askLisa(userMessage, attachment = null) {
         STORICO ECG: ${previousEcgText}
       `;
 
+      // Analisi con doppio output (chat + tecnico)
       const ecgAnalysis = await callGeminiForEcgAnalysis(userMessage, attachment.data, contextString);
 
       extractedData.frequenza_cardiaca = ecgAnalysis.frequenza_cardiaca || extractedData.frequenza_cardiaca;
 
-      // Upload
+      // Passiamo anche il commento tecnico ai dati da salvare nell'upload
+      extractedData.commento_tecnico = ecgAnalysis.commento_tecnico;
+
+      // Upload (userà la data estratta se presente)
       savedVitals = await uploadEcgAndSaveVitals(userId, attachment.file, extractedData);
 
-      lisaResponseText = ecgAnalysis.commento;
+      // Lisa risponde in chat con il messaggio empatico
+      lisaResponseText = ecgAnalysis.commento_chat || ecgAnalysis.commento; // Fallback
 
     } else {
       // Caso Testo
@@ -92,12 +98,16 @@ export async function askLisa(userMessage, attachment = null) {
       lisaResponseText = await callGeminiApi(payload);
     }
 
-    // 3. Aggiornamento Commento
-    if (savedVitals && savedVitals.id && lisaResponseText) {
-      await supabase.from('vital_signs').update({ commento_lisa: lisaResponseText }).eq('id', savedVitals.id);
-      fetchVitals();
-    } else if (savedVitals) {
-      fetchVitals();
+    // 3. Aggiornamento Commento Finale nel DB
+    if (savedVitals && savedVitals.id) {
+      // Se è un ECG, salviamo il commento tecnico nel DB (per il referto e lo storico).
+      // Se è testo, salviamo la risposta standard di Lisa.
+      const commentoDaSalvare = (attachment && attachment.type === 'image' && extractedData.commento_tecnico)
+        ? extractedData.commento_tecnico
+        : lisaResponseText;
+
+      await supabase.from('vital_signs').update({ commento_lisa: commentoDaSalvare }).eq('id', savedVitals.id);
+      fetchVitals(); // Aggiorna diario
     }
 
     return { text: lisaResponseText, action: actionToReturn };
@@ -108,7 +118,8 @@ export async function askLisa(userMessage, attachment = null) {
   }
 }
 
-// --- FUNZIONE AGGIUNTA QUI (Sostituisce l'import sbagliato) ---
+// --- FUNZIONI ESPORTATE (Compatibilità con il vecchio file) ---
+
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 

@@ -43,8 +43,8 @@ export async function callGeminiForEcgAnalysis(userMessage, imageBase64, context
     try {
       return JSON.parse(jsonText);
     } catch (parseError) {
-      // Fallback se l'IA non risponde con JSON valido
-      return { frequenza_cardiaca: null, commento: jsonText };
+      // Fallback: se il JSON fallisce, metti tutto nel chat comment
+      return { frequenza_cardiaca: null, commento_chat: jsonText, commento_tecnico: "Analisi non strutturata disponibile." };
     }
   } catch (apiError) {
     console.error("Errore API Gemini ECG:", apiError);
@@ -53,23 +53,29 @@ export async function callGeminiForEcgAnalysis(userMessage, imageBase64, context
 }
 
 // Upload sicuro del file originale su Storage
+// Nota: 'extractedData' ora contiene anche 'data_riferimento' se presente
 export async function uploadEcgAndSaveVitals(userId, fileObject, extractedData) {
   if (!userId) throw new Error('Utente non loggato');
+
+  // Determina la data: quella estratta dal testo o ADESSO
+  const createdAt = extractedData.data_riferimento || new Date().toISOString();
 
   if (!fileObject) {
     console.warn("Nessun file da caricare, salvo solo i dati.");
     return await saveExtractedVitals(userId, extractedData);
   }
 
-  // 1. Crea record DB
+  // 1. Crea record DB con la data corretta
   const vitalData = {
     user_id: userId,
+    created_at: createdAt, // <-- DATA STORICA
     pressione_sistolica: extractedData.pressione_sistolica || null,
     pressione_diastolica: extractedData.pressione_diastolica || null,
     frequenza_cardiaca: extractedData.frequenza_cardiaca || null,
     saturazione_ossigeno: extractedData.saturazione_ossigeno || null,
     braccio: extractedData.braccio || null,
-    commento_lisa: 'Analisi ECG in corso...'
+    // Salviamo inizialmente un placeholder o il commento tecnico se già pronto
+    commento_lisa: extractedData.commento_tecnico || 'Analisi ECG in corso...'
   };
 
   const { data: savedRecord, error: insertError } = await supabase
@@ -92,7 +98,6 @@ export async function uploadEcgAndSaveVitals(userId, fileObject, extractedData) 
     });
 
   if (!storageError) {
-    // 3. Aggiorna record con path
     const { data: updatedRecord } = await supabase
       .from('vital_signs')
       .update({ ecg_storage_path: filePath })
