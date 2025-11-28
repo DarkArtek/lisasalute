@@ -7,7 +7,6 @@ import { fetchVitals } from '../../store/diary'
 import { NURSE_ANALYSIS_PROMPT, DOCTOR_REPORT_PROMPT } from '../../prompts'
 
 // Importiamo dai sotto-moduli
-// AGGIUNTO: getWeeklyStats
 import { callGeminiForExtraction, saveExtractedVitals, updateLongTermMemory, getTodaysMeasurementCount, getWeeklyStats } from './dataService'
 import { callGeminiForEcgAnalysis, uploadEcgAndSaveVitals, getLastEcgAnalysis } from './ecgService'
 import { buildSystemInstruction, buildChatHistory } from './contextService'
@@ -33,7 +32,6 @@ export async function askLisa(userMessage, attachment = null) {
   let savedVitals = null;
 
   // Recupero dati contestuali in parallelo per velocità
-  // AGGIUNTO: chiamata a getWeeklyStats
   const [todaysCount, weeklyStats] = await Promise.all([
     getTodaysMeasurementCount(userId),
     getWeeklyStats(userId)
@@ -69,7 +67,6 @@ export async function askLisa(userMessage, attachment = null) {
         STORICO ECG: ${previousEcgText}
       `;
 
-      // Analisi con doppio output (chat + tecnico)
       const ecgAnalysis = await callGeminiForEcgAnalysis(userMessage, attachment.data, contextString);
 
       extractedData.frequenza_cardiaca = ecgAnalysis.frequenza_cardiaca || extractedData.frequenza_cardiaca;
@@ -106,8 +103,6 @@ export async function askLisa(userMessage, attachment = null) {
 
     // 3. Aggiornamento Commento Finale nel DB
     if (savedVitals && savedVitals.id) {
-      // Se è un ECG, salviamo il commento tecnico nel DB.
-      // Se è testo, salviamo la risposta standard di Lisa.
       const commentoDaSalvare = (attachment && attachment.type === 'image' && extractedData.commento_tecnico)
         ? extractedData.commento_tecnico
         : lisaResponseText;
@@ -124,10 +119,33 @@ export async function askLisa(userMessage, attachment = null) {
   }
 }
 
-// --- FUNZIONE AGGIUNTA QUI (Sostituisce l'import sbagliato) ---
+// --- FUNZIONE REPORT MEDICO (Aggiornata per Farmaci & Diagnosi) ---
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 
+  // 1. Recuperiamo i farmaci strutturati dal DB per avere le Classi Terapeutiche
+  let therapyText = "Nessuna terapia strutturata registrata.";
+  try {
+    const { data: userMeds } = await supabase
+      .from('medications')
+      .select('*, drug_catalog ( classe_terapeutica )')
+      .eq('user_id', profileData.id);
+
+    if (userMeds && userMeds.length > 0) {
+      therapyText = userMeds.map(m => {
+        const drugClass = m.drug_catalog?.classe_terapeutica || 'Classe non specificata';
+        const note = m.note ? ` (Note: ${m.note})` : '';
+        return `- ${m.nome_farmaco} [${drugClass}]: ${m.dosaggio}, ${m.frequenza}${note}`;
+      }).join('\n');
+    } else if (profileData.terapia_farmacologica) {
+      // Fallback sul vecchio campo testuale se non ci sono farmaci strutturati
+      therapyText = `(Da testo libero): ${profileData.terapia_farmacologica}`;
+    }
+  } catch (err) {
+    console.error("Errore recupero farmaci per report:", err);
+  }
+
+  // 2. Calcolo Statistiche Vitali (Invariato)
   let sysSum = 0, diaSum = 0, hrSum = 0;
   let bpCount = 0, hrCount = 0;
   let maxSys = 0;
@@ -139,6 +157,7 @@ export async function generateClinicalSummary(profileData, vitalsData) {
     const ecgDescriptions = ecgRecords.map(v => {
       const data = new Date(v.created_at).toLocaleDateString();
       let note = v.commento_lisa || "Nessuna analisi registrata";
+      // Pulizia testo per il PDF
       note = note.replace(/\*\*ATTENZIONE:.*professionale\.\*\*/s, "").trim();
       note = note.replace(/Sono una IA.*?medico\./s, "").trim();
       if (note.length > 1000) note = note.substring(0, 1000) + "...";
@@ -174,17 +193,28 @@ export async function generateClinicalSummary(profileData, vitalsData) {
       : "N/D"
   };
 
+  // 3. Costruzione del Prompt Avanzato
   const message = `
     DATI PAZIENTE:
     Nome: ${profileData.nome}
     Età: ${profileData.data_di_nascita ? new Date().getFullYear() - new Date(profileData.data_di_nascita).getFullYear() : 'N/D'}
-    TERAPIA: ${profileData.terapia_farmacologica || 'Nessuna indicata'}
+
+    TERAPIA FARMACOLOGICA ATTIVA (Con Classi Terapeutiche):
+    ${therapyText}
+
     STATISTICHE PERIODO (${stats.periodo}):
     Misurazioni totali: ${stats.totale_misurazioni}
     Media Pressione: ${stats.media_pa} mmHg
     Picco Sistolico: ${stats.picco_sistolico} mmHg
     Media Frequenza: ${stats.media_fc} bpm
-    REPORT TRACCIATI ECG: ${ecgSummaryText}
+
+    REPORT TRACCIATI ECG:
+    ${ecgSummaryText}
+
+    ISTRUZIONI AGGIUNTIVE PER IL REPORT:
+    1. Analizza la lista dei farmaci e le loro classi (es. [Antidiabetico], [ACE-Inibitore]).
+    2. Nella sezione "Valutazione Clinica", INCLUDI un paragrafo iniziale chiamato "Quadro Clinico Dedotto" dove ipotizzi le patologie croniche del paziente basandoti SOLO sulla terapia (es. "La presenza di Insulina suggerisce un quadro di Diabete Mellito...").
+    3. Correla l'andamento pressorio/cardiaco alla terapia (es. "Buon controllo pressorio in corso di terapia con...").
   `;
 
   try {
@@ -200,7 +230,6 @@ export async function generateClinicalSummary(profileData, vitalsData) {
 }
 
 export async function analyzeExistingRecord(record) {
-  // Implementazione semplificata per ri-analisi
   const analysisPrompt = NURSE_ANALYSIS_PROMPT;
   const systemInstruction = buildSystemInstruction(analysisPrompt);
   const chatHistory = [{ role: 'user', parts: [{ text: "Analizza questo record: " + JSON.stringify(record) }] }];
