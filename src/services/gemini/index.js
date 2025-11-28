@@ -7,11 +7,11 @@ import { fetchVitals } from '../../store/diary'
 import { NURSE_ANALYSIS_PROMPT, DOCTOR_REPORT_PROMPT } from '../../prompts'
 
 // Importiamo dai sotto-moduli
-import { callGeminiForExtraction, saveExtractedVitals, updateLongTermMemory, getTodaysMeasurementCount } from './dataService'
+// AGGIUNTO: getWeeklyStats
+import { callGeminiForExtraction, saveExtractedVitals, updateLongTermMemory, getTodaysMeasurementCount, getWeeklyStats } from './dataService'
 import { callGeminiForEcgAnalysis, uploadEcgAndSaveVitals, getLastEcgAnalysis } from './ecgService'
 import { buildSystemInstruction, buildChatHistory } from './contextService'
 
-// Funzione Helper interna per chiamare l'API testo
 async function callGeminiApi(payload) {
   try {
     const result = await model.generateContent(payload)
@@ -22,9 +22,6 @@ async function callGeminiApi(payload) {
   }
 }
 
-/**
- * askLisa: Funzione principale chiamata dalla ChatPage
- */
 export async function askLisa(userMessage, attachment = null) {
   console.log('askLisa (Modular): Inizio esecuzione...');
 
@@ -35,10 +32,17 @@ export async function askLisa(userMessage, attachment = null) {
   let actionToReturn = null;
   let savedVitals = null;
 
-  const todaysCount = await getTodaysMeasurementCount(userId);
+  // Recupero dati contestuali in parallelo per velocità
+  // AGGIUNTO: chiamata a getWeeklyStats
+  const [todaysCount, weeklyStats] = await Promise.all([
+    getTodaysMeasurementCount(userId),
+    getWeeklyStats(userId)
+  ]);
+
+  console.log(`askLisa: Misurazioni oggi: ${todaysCount}, Media settimanale: ${weeklyStats?.avgSys}/${weeklyStats?.avgDia}`);
 
   try {
-    // 1. Estrazione Dati (inclusa la data storica)
+    // 1. Estrazione Dati
     const extractedData = await callGeminiForExtraction(userMessage);
 
     if (extractedData.nuova_memoria) {
@@ -84,7 +88,6 @@ export async function askLisa(userMessage, attachment = null) {
       console.log('askLisa: [FASE 2B] Avvio analisi Testo...');
       savedVitals = await saveExtractedVitals(userId, extractedData);
 
-      // Timer Logic
       const s = extractedData.pressione_sistolica;
       const d = extractedData.pressione_diastolica;
       if ((s && s >= 130) || (d && d >= 85)) {
@@ -93,14 +96,17 @@ export async function askLisa(userMessage, attachment = null) {
 
       const payload = {
         contents: buildChatHistory(userMessage),
-        systemInstruction: { parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount) }] },
+        systemInstruction: {
+          // Passiamo weeklyStats alla funzione
+          parts: [{ text: buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount, weeklyStats) }]
+        },
       };
       lisaResponseText = await callGeminiApi(payload);
     }
 
     // 3. Aggiornamento Commento Finale nel DB
     if (savedVitals && savedVitals.id) {
-      // Se è un ECG, salviamo il commento tecnico nel DB (per il referto e lo storico).
+      // Se è un ECG, salviamo il commento tecnico nel DB.
       // Se è testo, salviamo la risposta standard di Lisa.
       const commentoDaSalvare = (attachment && attachment.type === 'image' && extractedData.commento_tecnico)
         ? extractedData.commento_tecnico
@@ -118,8 +124,7 @@ export async function askLisa(userMessage, attachment = null) {
   }
 }
 
-// --- FUNZIONI ESPORTATE (Compatibilità con il vecchio file) ---
-
+// --- FUNZIONE AGGIUNTA QUI (Sostituisce l'import sbagliato) ---
 export async function generateClinicalSummary(profileData, vitalsData) {
   console.log('generateClinicalSummary: Elaborazione dati per il medico...');
 
