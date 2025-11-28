@@ -25,7 +25,12 @@ import {
   faHeartbeat,
   faFileAudio,
   faChartLine,
-  faUserMd
+  faUserMd, faArrowLeft, faArrowRight,
+  faCloudUploadAlt,
+  faPlus,
+  faCheckCircle,
+  faExclamationCircle,
+  faPills
 } from '@fortawesome/free-solid-svg-icons'
 
 // Aggiungiamo le icone alla libreria
@@ -43,7 +48,14 @@ library.add(
   faHeartbeat,
   faFileAudio,
   faChartLine,
-  faUserMd
+  faUserMd,
+  faArrowLeft,
+  faArrowRight,
+  faCloudUploadAlt,
+  faPlus,
+  faCheckCircle,
+  faExclamationCircle,
+  faPills
 )
 
 // Creazione dell'istanza dell'app
