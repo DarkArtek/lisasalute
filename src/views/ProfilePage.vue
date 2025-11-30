@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 pb-24 max-w-4xl mx-auto"> <!-- Max width aumentata per layout migliore -->
+  <div class="p-4 pb-24 max-w-4xl mx-auto">
     <h1 class="text-2xl font-semibold mb-4 flex items-center">
       <font-awesome-icon icon="user" class="mr-2 text-blue-600" />
       Profilo Utente
@@ -7,84 +7,105 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-      <!-- COLONNA SX: Dati Anagrafici (Esistente) -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 h-fit">
-        <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-4">Dati Personali</h2>
+      <!-- COLONNA SX: Dati Anagrafici + MEMORIA LISA -->
+      <div class="space-y-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+          <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-4">Dati Personali</h2>
 
-        <div v-if="profileLoading" class="py-4">
-          <Loader />
-        </div>
-
-        <form v-if="profile && !profileLoading" @submit.prevent="handleSaveProfile">
-          <!-- Email -->
-          <div v-if="user" class="mb-4">
-            <label class="label">Email</label>
-            <input type="email" :value="user.email" disabled class="input-field bg-gray-100 cursor-not-allowed" />
+          <div v-if="profileLoading" class="py-4">
+            <Loader />
           </div>
 
-          <!-- Nome -->
-          <div class="mb-4">
-            <label for="nome" class="label">Nome Completo</label>
-            <input type="text" id="nome" v-model="profile.nome" class="input-field" />
-          </div>
-
-          <div class="grid grid-cols-2 gap-4 mb-4">
-            <!-- Sesso -->
-            <div>
-              <label for="sesso" class="label">Sesso</label>
-              <select id="sesso" v-model="profile.sesso" class="input-field">
-                <option value="M">Maschile</option>
-                <option value="F">Femminile</option>
-                <option value="Altro">Altro</option>
-              </select>
+          <form v-if="profile && !profileLoading" @submit.prevent="handleSaveProfile">
+            <!-- Email -->
+            <div v-if="user" class="mb-4">
+              <label class="label">Email</label>
+              <input type="email" :value="user.email" disabled class="input-field bg-gray-100 cursor-not-allowed" />
             </div>
-            <!-- Data Nascita -->
-            <div>
-              <label for="data_nascita" class="label">Data di Nascita</label>
-              <input type="date" id="data_nascita" v-model="profile.data_di_nascita" class="input-field" />
+
+            <!-- Nome -->
+            <div class="mb-4">
+              <label for="nome" class="label">Nome Completo</label>
+              <input type="text" id="nome" v-model="profile.nome" class="input-field" />
             </div>
-          </div>
 
-          <!-- Tipo Misuratore -->
-          <div class="mb-4">
-            <label for="tipo_misuratore" class="label">Tipo Misuratore</label>
-            <select id="tipo_misuratore" v-model="profile.tipo_misuratore" class="input-field">
-              <option value="automatico">Automatico (Digitale)</option>
-              <option value="manuale">Manuale (Auscultatorio)</option>
-            </select>
-          </div>
-
-          <!-- Orari -->
-          <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
-            <div class="flex items-center justify-between mb-2">
-              <label class="label text-purple-600 dark:text-purple-400">Orari Misurazioni</label>
-              <div class="flex items-center">
-                <input type="checkbox" id="scheduler" v-model="profile.abilita_scheduler" class="mr-2 h-4 w-4 text-purple-600 rounded">
-                <label for="scheduler" class="text-xs">Attiva</label>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <!-- Sesso -->
+              <div>
+                <label for="sesso" class="label">Sesso</label>
+                <select id="sesso" v-model="profile.sesso" class="input-field">
+                  <option value="M">Maschile</option>
+                  <option value="F">Femminile</option>
+                  <option value="Altro">Altro</option>
+                </select>
+              </div>
+              <!-- Data Nascita -->
+              <div>
+                <label for="data_nascita" class="label">Data di Nascita</label>
+                <input type="date" id="data_nascita" v-model="profile.data_di_nascita" class="input-field" />
               </div>
             </div>
-            <div class="grid grid-cols-3 gap-2" v-if="profile.abilita_scheduler">
-              <input type="time" v-model="profile.orario_mattina" class="input-field text-center px-1" />
-              <input type="time" v-model="profile.orario_pomeriggio" class="input-field text-center px-1" />
-              <input type="time" v-model="profile.orario_sera" class="input-field text-center px-1" />
+
+            <!-- Tipo Misuratore -->
+            <div class="mb-4">
+              <label for="tipo_misuratore" class="label">Tipo Misuratore</label>
+              <select id="tipo_misuratore" v-model="profile.tipo_misuratore" class="input-field">
+                <option value="automatico">Automatico (Digitale)</option>
+                <option value="manuale">Manuale (Auscultatorio)</option>
+              </select>
+            </div>
+
+            <!-- Orari -->
+            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+              <div class="flex items-center justify-between mb-2">
+                <label class="label text-purple-600 dark:text-purple-400">Orari Misurazioni</label>
+                <div class="flex items-center">
+                  <input type="checkbox" id="scheduler" v-model="profile.abilita_scheduler" class="mr-2 h-4 w-4 text-purple-600 rounded">
+                  <label for="scheduler" class="text-xs">Attiva</label>
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2" v-if="profile.abilita_scheduler">
+                <input type="time" v-model="profile.orario_mattina" class="input-field text-center px-1" />
+                <input type="time" v-model="profile.orario_pomeriggio" class="input-field text-center px-1" />
+                <input type="time" v-model="profile.orario_sera" class="input-field text-center px-1" />
+              </div>
+            </div>
+
+            <button type="submit" :disabled="saveLoading" class="mt-6 w-full btn-primary">
+              {{ saveLoading ? 'Salvataggio...' : 'Salva Dati' }}
+            </button>
+
+            <p v-if="saveSuccessMessage" class="text-green-600 text-sm mt-2 text-center">{{ saveSuccessMessage }}</p>
+          </form>
+        </div>
+
+        <!-- BOX MEMORIA DI LISA (NUOVO - READ ONLY) -->
+        <div v-if="profile" class="bg-purple-50 dark:bg-gray-800 rounded-lg shadow-md p-6 border-2 border-purple-100 dark:border-purple-900/30">
+          <h3 class="text-sm font-bold text-purple-800 dark:text-purple-300 mb-3 flex items-center">
+            <font-awesome-icon icon="brain" class="mr-2" />
+            Memoria di Lisa
+          </h3>
+          <div class="relative">
+            <textarea
+              v-model="profile.lisa_memory"
+              readonly
+              placeholder="Lisa non ha ancora memorizzato nulla su di te..."
+              class="w-full h-32 p-3 text-sm bg-white dark:bg-gray-900 rounded-lg border border-purple-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 resize-none focus:outline-none cursor-not-allowed opacity-80 font-mono leading-relaxed"
+            ></textarea>
+            <div class="absolute bottom-2 right-2 text-xs text-purple-400 italic bg-white dark:bg-gray-900 px-2 rounded">
+              Solo lettura (Gestito dall'IA)
             </div>
           </div>
-
-          <button type="submit" :disabled="saveLoading" class="mt-6 w-full btn-primary">
-            {{ saveLoading ? 'Salvataggio...' : 'Salva Dati' }}
-          </button>
-
-          <p v-if="saveSuccessMessage" class="text-green-600 text-sm mt-2 text-center">{{ saveSuccessMessage }}</p>
-        </form>
+          <p class="text-xs text-purple-600 dark:text-purple-400 mt-2">
+            * In questo spazio, Lisa annota automaticamente le tue preferenze e dettagli clinici importanti emersi dalle chat.
+          </p>
+        </div>
       </div>
 
-      <!-- COLONNA DX: Gestione Farmaci (NUOVO) -->
+      <!-- COLONNA DX: Gestione Farmaci -->
       <div class="space-y-6">
-
-        <!-- Componente Selettore -->
         <MedicationSelector @drug-added="handleDrugAdded" />
 
-        <!-- Lista Farmaci -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
           <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-4 flex justify-between items-center">
             <span>La tua Terapia</span>
@@ -123,14 +144,12 @@
           </ul>
         </div>
 
-        <!-- Logout -->
         <button
           @click="handleLogout"
           class="w-full py-2 bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg font-semibold text-sm transition-colors"
         >
           Disconnetti
         </button>
-
       </div>
     </div>
   </div>
@@ -145,25 +164,25 @@ import {
   loading as profileLoading,
   error as profileError,
   updateProfile,
-  medications, // Lista dallo store
-  addMedication, // Azione add
-  removeMedication // Azione remove
+  medications,
+  addMedication,
+  removeMedication
 } from '../store/profile.js';
 
 import Loader from '../components/Loader.vue';
-import MedicationSelector from '../components/MedicationSelector.vue'; // Import Componente
+import MedicationSelector from '../components/MedicationSelector.vue';
+import { library } from '@fortawesome/fontawesome-svg-core';
+import { faBrain } from '@fortawesome/free-solid-svg-icons';
 
-// Stati UI
-const logoutLoading = ref(false);
+library.add(faBrain); // Aggiungiamo icona cervello localmente se manca
+
 const saveLoading = ref(false);
 const saveSuccessMessage = ref(null);
 const user = computed(() => userSession.value?.user ?? null);
 
-// Gestione Aggiunta Farmaco (Evento dal componente figlio)
 const handleDrugAdded = async (medData) => {
   try {
     await addMedication(medData);
-    // Feedback visivo opzionale?
   } catch (e) {
     alert("Errore aggiunta farmaco: " + e.message);
   }
@@ -185,7 +204,6 @@ const handleSaveProfile = async () => {
 const handleLogout = async () => {
   const { error } = await supabase.auth.signOut();
   if (error) console.error(error);
-  // Router gestirà il redirect
 };
 </script>
 
