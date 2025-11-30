@@ -1,7 +1,7 @@
 /* dataService.js - Gestione estrazione dati e memoria */
 import { model } from './client';
 import { supabase } from '../../supabase';
-import { EXTRACTION_PROMPT } from '../../prompts';
+import { DATA_EXTRACTION_PROMPT } from '../../prompts';
 
 // Funzione principale di estrazione
 export async function callGeminiForExtraction(userMessage) {
@@ -11,7 +11,7 @@ export async function callGeminiForExtraction(userMessage) {
       systemInstruction: {
         parts: [{
           text: `
-          ${EXTRACTION_PROMPT}
+          ${DATA_EXTRACTION_PROMPT}
 
           AGGIUNTA MEMORIA:
           Se nel testo l'utente menziona preferenze personali, abitudini o dettagli medici permanenti che dovresti ricordare per il futuro (es. "Uso il braccio destro", "Il mio medico è il Dr. House", "Odio le pastiglie grandi", "Uso il fonendoscopio Littmann"), estrai questo testo nel campo JSON "nuova_memoria".
