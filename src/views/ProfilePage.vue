@@ -71,6 +71,25 @@
               </div>
             </div>
 
+            <!-- SEZIONE OPERATORE SANITARIO (NUOVA) -->
+            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4 bg-red-50 dark:bg-red-900/10 -mx-6 px-6 py-4">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                  <font-awesome-icon icon="user-doctor" class="text-red-600 dark:text-red-400 mr-2" />
+                  <span class="text-sm font-bold text-red-700 dark:text-red-300">Operatore Sanitario (SUEM)</span>
+                </div>
+                <div class="flex items-center">
+                  <!-- Checkbox collegata a suem_enabled -->
+                  <input type="checkbox" id="suem" v-model="profile.suem_enabled" class="mr-2 h-5 w-5 text-red-600 rounded cursor-pointer">
+                  <label for="suem" class="text-xs font-semibold cursor-pointer select-none ml-1">Abilita Modalità</label>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-tight">
+                Attiva l'interfaccia "Dottoressa Lisa" nella chat per il supporto operativo in emergenza.
+                <span v-if="profile.suem_enabled" class="block mt-1 text-red-600 font-bold">⚠️ Switch disponibile in chat.</span>
+              </p>
+            </div>
+
             <button type="submit" :disabled="saveLoading" class="mt-6 w-full btn-primary">
               {{ saveLoading ? 'Salvataggio...' : 'Salva Dati' }}
             </button>
@@ -79,7 +98,7 @@
           </form>
         </div>
 
-        <!-- BOX MEMORIA DI LISA (NUOVO - READ ONLY) -->
+        <!-- BOX MEMORIA DI LISA (READ ONLY) -->
         <div v-if="profile" class="bg-purple-50 dark:bg-gray-800 rounded-lg shadow-md p-6 border-2 border-purple-100 dark:border-purple-900/30">
           <h3 class="text-sm font-bold text-purple-800 dark:text-purple-300 mb-3 flex items-center">
             <font-awesome-icon icon="brain" class="mr-2" />
@@ -172,9 +191,11 @@ import {
 import Loader from '../components/Loader.vue';
 import MedicationSelector from '../components/MedicationSelector.vue';
 import { library } from '@fortawesome/fontawesome-svg-core';
-import { faBrain } from '@fortawesome/free-solid-svg-icons';
+// Importiamo le icone necessarie, inclusa la nuova faUserDoctor
+import { faBrain, faUserDoctor, faPills, faTrashCan, faUser } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faBrain); // Aggiungiamo icona cervello localmente se manca
+// Aggiungiamo tutte le icone usate in questa pagina per sicurezza
+library.add(faBrain, faUserDoctor, faPills, faTrashCan, faUser);
 
 const saveLoading = ref(false);
 const saveSuccessMessage = ref(null);

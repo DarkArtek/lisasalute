@@ -4,3 +4,4 @@ export * from './ecgAnalysis.js';
 export * from './audioAnalysis.js';
 export * from './doctorReport.js';
 export * from './nurseGuide.js';
+export * from './suemAssistant.js'

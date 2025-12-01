@@ -1,12 +1,25 @@
 import { ref, watchEffect, nextTick } from 'vue'
 import { supabase } from '../supabase'
 import { userSession } from './auth.js'
-import { profile } from './profile.js' // Importiamo il profilo per il nome
+import { profile } from './profile.js'
+
+// --- IMPORT PER L'INTELLIGENZA ARTIFICIALE (GEMINI) ---
+import { model } from '../services/gemini/client';
+import { buildSystemInstruction, buildChatHistory } from '../services/gemini/contextService';
+import {
+  callGeminiForExtraction,
+  saveExtractedVitals,
+  getTodaysMeasurementCount,
+  getWeeklyStats,
+  updateLongTermMemory
+} from '../services/gemini/dataService';
+
+// Importiamo i prompt per le due personalità
+import { NURSE_ANALYSIS_PROMPT, SUEM_ASSISTANT_PROMPT } from '../prompts';
 
 /**
  * Gestisce lo stato della cronologia chat
  */
-
 export const messages = ref([])
 export const loading = ref(false)
 export const error = ref(null)
@@ -16,36 +29,36 @@ export const error = ref(null)
  */
 export async function fetchMessages() {
   if (!userSession.value) {
-    console.log('FetchMessages: Utente non loggato, stop.');
     messages.value = []
     return
   }
   const userId = userSession.value.user.id
-  console.log('FetchMessages: Caricamento messaggi per', userId)
+  // console.log('FetchMessages: Caricamento messaggi per', userId)
 
   try {
-    loading.value = true
-    error.value = null // Resetta l'errore
+    // Non settiamo loading globale qui per evitare flicker all'avvio se c'è cache
+    // loading.value = true
+    error.value = null
 
     const { data, error: fetchError } = await supabase
       .from('chat_messages')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: true }) // Ordina dal più vecchio al più nuovo
+      .order('created_at', { ascending: true })
 
     if (fetchError) throw fetchError
 
+    // Mappiamo i dati per aggiungere un flag visivo locale se necessario
+    // (Nota: suem_mode non è salvato nel DB per ora, quindi lo storico sarà neutro)
     messages.value = data || []
-    console.log(`FetchMessages: Caricati ${messages.value.length} messaggi.`);
 
-    // Assicura che la UI scorra alla fine dopo il caricamento
     scrollToBottom();
 
   } catch (err) {
     console.error('Errore caricamento messaggi:', err.message)
-    error.value = err.message // Assegna l'errore
+    error.value = err.message
   } finally {
-    loading.value = false
+    // loading.value = false
   }
 }
 
@@ -53,20 +66,15 @@ export async function fetchMessages() {
  * Aggiunge un nuovo messaggio al DB e allo store locale
  * @param {'user' | 'assistant'} role
  * @param {string} content
+ * @param {boolean} isSuem - Flag locale per stilizzare il messaggio corrente (non persistito nel DB standard)
  */
-export async function addMessage(role, content) {
-  if (!userSession.value) {
-    console.error('AddMessage: Utente non loggato.');
-    return;
-  }
-  if (!content || !content.trim()) {
-    console.warn('AddMessage: Contenuto vuoto, stop.');
-    return;
-  }
+export async function addMessage(role, content, isSuem = false) {
+  if (!userSession.value) return;
+  if (!content || !content.trim()) return;
 
   const userId = userSession.value.user.id
 
-  const newMessage = {
+  const newMessagePayload = {
     user_id: userId,
     role: role,
     content: content
@@ -76,47 +84,140 @@ export async function addMessage(role, content) {
     // 1. Salva nel DB
     const { data, error: insertError } = await supabase
       .from('chat_messages')
-      .insert(newMessage)
-      .select() // Restituisce il record appena creato
+      .insert(newMessagePayload)
+      .select()
       .single()
 
     if (insertError) throw insertError
 
-    // 2. Aggiunge allo store locale (con l'ID e il created_at)
-    messages.value.push(data)
-    console.log('AddMessage: Messaggio salvato', data.role);
+    // 2. Aggiunge allo store locale arricchendolo con il flag SUEM per la UI corrente
+    const localMessage = { ...data, isSuem: isSuem };
+    messages.value.push(localMessage)
 
-    // Assicura che la UI scorra alla fine
     scrollToBottom();
-
-    // Restituisce il messaggio salvato (utile per la logica IA)
-    return data
+    return localMessage
 
   } catch (err) {
     console.error('Errore salvataggio messaggio:', err.message)
-    error.value = `Errore invio: ${err.message}` // Assegna l'errore
+    error.value = `Errore invio: ${err.message}`
+  }
+}
+
+/**
+ * NUOVA FUNZIONE CORE: Invia messaggio a Gemini gestendo la logica Personale vs SUEM
+ * @param {string} userMessage - Il testo dell'utente
+ * @param {boolean} isSuemMode - Se TRUE, attiva la Dottoressa SUEM
+ */
+export async function sendMessage(userMessage, isSuemMode = false) {
+  if (!userMessage.trim()) return;
+
+  // 1. Salva il messaggio dell'utente nel DB (e lo mostra a schermo)
+  await addMessage('user', userMessage, isSuemMode);
+
+  loading.value = true;
+  const userId = userSession.value?.user?.id;
+
+  try {
+    let systemInstructionText = "";
+
+    // --- RAMIFICAZIONE LOGICA: SUEM vs PERSONALE ---
+
+    if (isSuemMode) {
+      // === MODALITÀ SUEM (OPERATIVA) ===
+      // Carichiamo il prompt "Collega Dottoressa" e solo contesto anagrafico base.
+      // SALTANDO completamente l'estrazione dati clinici per privacy pazienti.
+      systemInstructionText = buildSystemInstruction(SUEM_ASSISTANT_PROMPT, 0, null, true);
+
+      console.log("Chat: Modalità SUEM attiva. Nessun dato salvato.");
+
+    } else {
+      // === MODALITÀ PERSONALE (MEDICO CURANTE) ===
+
+      // A. Estrazione Dati e Memoria (Parallela per velocità)
+      const [extractionResult, todaysCount, weeklyStats] = await Promise.all([
+        callGeminiForExtraction(userMessage),
+        userId ? getTodaysMeasurementCount(userId) : 0,
+        userId ? getWeeklyStats(userId) : null
+      ]);
+
+      // B. Salvataggio Dati (Se presenti e validi per l'utente)
+      if (userId && extractionResult) {
+        // Salvataggio Parametri Vitali
+        if (extractionResult.pressione_sistolica || extractionResult.frequenza_cardiaca || extractionResult.saturazione_ossigeno) {
+          await saveExtractedVitals(userId, extractionResult);
+        }
+        // Aggiornamento Memoria Lungo Termine
+        if (extractionResult.nuova_memoria) {
+          await updateLongTermMemory(userId, extractionResult.nuova_memoria);
+        }
+      }
+
+      // C. Costruzione Prompt Infermiera/MMG
+      systemInstructionText = buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount, weeklyStats, false);
+    }
+
+    // 2. Chiamata a Gemini
+    const chatPayload = {
+      contents: buildChatHistory(userMessage),
+      systemInstruction: { parts: [{ text: systemInstructionText }] }
+    };
+
+    const result = await model.generateContent(chatPayload);
+    const responseText = result.response.text();
+
+    // 3. Salva la risposta dell'AI nel DB
+    await addMessage('assistant', responseText, isSuemMode);
+
+  } catch (error) {
+    console.error("Errore Chat Gemini:", error);
+    // Messaggio di errore locale (non salvato nel DB per non sporcarlo, o salvato se preferisci)
+    messages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: "Mi dispiace, ho avuto un problema di connessione col server cerebrale. Riprova tra poco.",
+      isError: true
+    });
+  } finally {
+    loading.value = false;
   }
 }
 
 /**
  * Funzione helper per scrollare la chat in fondo.
- * Usa un doppio approccio (subito + timeout) per gestire
- * i ritardi di rendering del DOM (immagini, markdown).
  */
 export async function scrollToBottom() {
-  // Aspetta il prossimo "tick" del DOM, così Vue ha tempo di renderizzare
   await nextTick()
-  // Seleziona il contenitore della chat (definito in ChatPage.vue)
   const container = document.getElementById('chat-container')
+  // Se stiamo usando ref nel componente, questo ID deve esistere nel template
   if (container) {
-    // Primo tentativo: subito
     container.scrollTop = container.scrollHeight;
-
-    // Secondo tentativo: dopo un attimo (per sicurezza)
-    // Utile se ci sono immagini che si caricano o markdown pesante
     setTimeout(() => {
       if (container) container.scrollTop = container.scrollHeight;
     }, 100);
+  }
+}
+
+/**
+ * Pulisce la cronologia chat
+ */
+export async function clearChatHistory() {
+  if (!userSession.value) return;
+
+  const userId = userSession.value.user.id;
+
+  try {
+    const { error: deleteError } = await supabase
+      .from('chat_messages')
+      .delete()
+      .eq('user_id', userId);
+
+    if (deleteError) throw deleteError;
+
+    messages.value = [];
+
+  } catch (err) {
+    console.error('Errore pulizia chat:', err.message);
+    error.value = `Errore pulizia: ${err.message}`;
   }
 }
 
@@ -125,62 +226,19 @@ watchEffect(() => {
   if (userSession.value) {
     fetchMessages()
   } else {
-    // Se l'utente fa logout, pulisce la chat
     messages.value = []
   }
 })
 
-/**
- * Pulisce la cronologia chat
- */
-export async function clearChatHistory() {
-  if (!userSession.value) {
-    console.error('ClearChat: Utente non loggato.');
-    return;
-  }
-
-  const userId = userSession.value.user.id;
-  console.log('ClearChat: Avvio pulizia chat per', userId);
-
-  try {
-    // 1. Pulisce il DB
-    const { error: deleteError } = await supabase
-      .from('chat_messages')
-      .delete()
-      .eq('user_id', userId);
-
-    if (deleteError) throw deleteError;
-
-    // 2. Pulisce lo store locale
-    messages.value = [];
-    console.log('ClearChat: Pulizia completata.');
-
-  } catch (err) {
-    console.error('Errore pulizia chat:', err.message);
-    error.value = `Errore pulizia: ${err.message}`;
-  }
-}
-
-
-//
 // --- LOGICA REMINDER ---
-//
-/**
- * Imposta un reminder IN-CHAT dopo N minuti.
- * @param {number} minutes - Minuti di attesa.
- */
 export function setReminder(minutes) {
-  const nomeUtente = profile.value?.nome || 'Paziente'; // Prende il nome
-  const delay = minutes * 60 * 1000; // Converti minuti in millisecondi
+  const nomeUtente = profile.value?.nome || 'Utente';
+  const delay = minutes * 60 * 1000;
 
   console.log(`Timer IN-CHAT impostato: reminder tra ${minutes} minuti.`);
 
   setTimeout(() => {
-    // Messaggio che viene inviato automaticamente da Lisa
     const messaggio = `Ciao ${nomeUtente}! Sono passati ${minutes} minuti. È il momento di effettuare la seconda misurazione della pressione come abbiamo discusso.`;
-
-    console.log('Reminder: Invio messaggio in chat...');
     addMessage('assistant', messaggio);
-
   }, delay);
 }
