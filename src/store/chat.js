@@ -49,7 +49,6 @@ export async function fetchMessages() {
     if (fetchError) throw fetchError
 
     // Mappiamo i dati per aggiungere un flag visivo locale se necessario
-    // (Nota: suem_mode non è salvato nel DB per ora, quindi lo storico sarà neutro)
     messages.value = data || []
 
     scrollToBottom();
@@ -66,7 +65,7 @@ export async function fetchMessages() {
  * Aggiunge un nuovo messaggio al DB e allo store locale
  * @param {'user' | 'assistant'} role
  * @param {string} content
- * @param {boolean} isSuem - Flag locale per stilizzare il messaggio corrente (non persistito nel DB standard)
+ * @param {boolean} isSuem - Flag locale per stilizzare il messaggio corrente
  */
 export async function addMessage(role, content, isSuem = false) {
   if (!userSession.value) return;
@@ -111,7 +110,7 @@ export async function addMessage(role, content, isSuem = false) {
 export async function sendMessage(userMessage, isSuemMode = false) {
   if (!userMessage.trim()) return;
 
-  // 1. Salva il messaggio dell'utente nel DB (e lo mostra a schermo)
+  // 1. Salva il messaggio dell'utente nel DB (e lo mette in messages.value)
   await addMessage('user', userMessage, isSuemMode);
 
   loading.value = true;
@@ -156,9 +155,15 @@ export async function sendMessage(userMessage, isSuemMode = false) {
       systemInstructionText = buildSystemInstruction(NURSE_ANALYSIS_PROMPT, todaysCount, weeklyStats, false);
     }
 
-    // 2. Chiamata a Gemini
+    // --- FIX MEMORIA: Passiamo lo storico a Gemini ---
+    // messages.value contiene già l'ultimo messaggio (appena aggiunto sopra con addMessage).
+    // Dobbiamo passare a buildChatHistory tutto l'array TRANNE l'ultimo, perché
+    // buildChatHistory si aspetta (messaggioCorrente, storicoPrecedente).
+    const history = messages.value.slice(0, -1);
+
+    // 2. Chiamata a Gemini con Storico
     const chatPayload = {
-      contents: buildChatHistory(userMessage),
+      contents: buildChatHistory(userMessage, history),
       systemInstruction: { parts: [{ text: systemInstructionText }] }
     };
 
@@ -170,7 +175,6 @@ export async function sendMessage(userMessage, isSuemMode = false) {
 
   } catch (error) {
     console.error("Errore Chat Gemini:", error);
-    // Messaggio di errore locale (non salvato nel DB per non sporcarlo, o salvato se preferisci)
     messages.value.push({
       id: Date.now(),
       role: 'assistant',
@@ -238,7 +242,9 @@ export function setReminder(minutes) {
   console.log(`Timer IN-CHAT impostato: reminder tra ${minutes} minuti.`);
 
   setTimeout(() => {
-    const messaggio = `Ciao ${nomeUtente}! Sono passati ${minutes} minuti. È il momento di effettuare la seconda misurazione della pressione come abbiamo discusso.`;
+    // Messaggio generico: "Sono passati X minuti. Ci sono novità?"
+    // Lasciamo che sia Lisa (e l'utente) a decidere se serve una misurazione o altro.
+    const messaggio = `Ciao ${nomeUtente}! Sono passati ${minutes} minuti. Volevo sapere come va o se hai nuovi valori da comunicarmi.`;
     addMessage('assistant', messaggio);
   }, delay);
 }

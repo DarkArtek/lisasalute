@@ -2,8 +2,25 @@
 import { profile } from '../../store/profile';
 import { medications } from '../../store/profile';
 
-export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats = null) {
+// Modificato per accettare il flag isSuemMode
+export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats = null, isSuemMode = false) {
   const userProfile = profile.value || {};
+
+  // --- MODALITÀ SUEM (LAVORO) ---
+  if (isSuemMode) {
+    return `
+      ${basePrompt}
+
+      CONTESTO UTENTE (TUO COLLEGA):
+      Nome: ${userProfile.nome || 'Collega'}
+      Sesso: ${userProfile.sesso || 'Non specificato'}
+
+      NOTA SISTEMA: Sei in modalità operativa. Ignora i dati medici personali dell'utente salvati nel database.
+      Mantieni il filo del discorso basandoti sulla cronologia della chat fornita.
+    `;
+  }
+
+  // --- MODALITÀ PERSONALE (STANDARD) ---
 
   // Costruzione della stringa farmaci (se presenti)
   let medsList = "Nessuna terapia registrata.";
@@ -24,8 +41,7 @@ export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats 
     `;
   }
 
-  // --- MEMORIA A LUNGO TERMINE (NUOVO) ---
-  // Qui leggiamo il campo 'lisa_memory' dal profilo
+  // Costruzione Memoria a Lungo Termine
   const longTermMemory = userProfile.lisa_memory
     ? `\n\nMEMORIA A LUNGO TERMINE (Note personali su ${userProfile.nome}):\n"${userProfile.lisa_memory}"\nUsa queste informazioni per personalizzare la risposta.`
     : "";
@@ -35,6 +51,7 @@ export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats 
 
     CONTESTO UTENTE:
     Nome: ${userProfile.nome || 'Utente'}
+    Sesso: ${userProfile.sesso || 'Non specificato'}
     Terapia:
     ${medsList}
     ${statsInfo}
@@ -44,11 +61,23 @@ export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats 
   `;
 }
 
-export function buildChatHistory(userMessage) {
-  return [
-    {
-      role: "user",
-      parts: [{ text: userMessage }]
-    }
-  ];
+// --- FIX MEMORIA CONTESTUALE ---
+// Ora accetta anche 'previousMessages' (lo storico) per evitare che Lisa perda il filo
+export function buildChatHistory(userMessage, previousMessages = []) {
+  // 1. Convertiamo i messaggi precedenti dal formato DB (role: 'user'/'assistant')
+  // al formato Gemini (role: 'user'/'model')
+  const history = previousMessages
+    .slice(-15) // Prendiamo solo gli ultimi 15 messaggi per non intasare il contesto
+    .map(msg => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }]
+    }));
+
+  // 2. Aggiungiamo il messaggio corrente dell'utente in fondo
+  history.push({
+    role: "user",
+    parts: [{ text: userMessage }]
+  });
+
+  return history;
 }
