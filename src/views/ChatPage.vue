@@ -7,8 +7,8 @@
         <!-- Titolo Dinamico -->
         <h1 class="text-lg font-bold flex items-center transition-colors duration-300"
             :class="isSuemMode ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'">
-          <font-awesome-icon :icon="isSuemMode ? 'user-doctor' : 'user-nurse'" class="mr-2 text-xl" />
-          {{ isSuemMode ? 'Dott.ssa Lisa (SUEM)' : 'Lisa Assistente' }}
+          <font-awesome-icon :icon="isSuemMode ? 'user-doctor' : 'user-doctor'" class="mr-2 text-xl" />
+          {{ isSuemMode ? 'Dott.ssa Lisa (SUEM)' : 'Dott.ssa Lisa (MMG)' }}
         </h1>
       </div>
 
