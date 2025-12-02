@@ -11,7 +11,8 @@ import {
   saveExtractedVitals,
   getTodaysMeasurementCount,
   getWeeklyStats,
-  updateLongTermMemory
+  updateLongTermMemory,
+  updateVitalSignComment // <--- NUOVO IMPORT
 } from '../services/gemini/dataService';
 
 // Importiamo i prompt per le due personalità
@@ -116,6 +117,9 @@ export async function sendMessage(userMessage, isSuemMode = false) {
   loading.value = true;
   const userId = userSession.value?.user?.id;
 
+  // Variabile per tracciare l'ID del record vitali salvato (se c'è)
+  let savedVitalRecordId = null;
+
   try {
     let systemInstructionText = "";
 
@@ -143,7 +147,11 @@ export async function sendMessage(userMessage, isSuemMode = false) {
       if (userId && extractionResult) {
         // Salvataggio Parametri Vitali
         if (extractionResult.pressione_sistolica || extractionResult.frequenza_cardiaca || extractionResult.saturazione_ossigeno) {
-          await saveExtractedVitals(userId, extractionResult);
+          // MODIFICA: Salviamo il risultato per prendere l'ID
+          const savedData = await saveExtractedVitals(userId, extractionResult);
+          if (savedData) {
+            savedVitalRecordId = savedData.id;
+          }
         }
         // Aggiornamento Memoria Lungo Termine
         if (extractionResult.nuova_memoria) {
@@ -156,9 +164,6 @@ export async function sendMessage(userMessage, isSuemMode = false) {
     }
 
     // --- FIX MEMORIA: Passiamo lo storico a Gemini ---
-    // messages.value contiene già l'ultimo messaggio (appena aggiunto sopra con addMessage).
-    // Dobbiamo passare a buildChatHistory tutto l'array TRANNE l'ultimo, perché
-    // buildChatHistory si aspetta (messaggioCorrente, storicoPrecedente).
     const history = messages.value.slice(0, -1);
 
     // 2. Chiamata a Gemini con Storico
@@ -172,6 +177,12 @@ export async function sendMessage(userMessage, isSuemMode = false) {
 
     // 3. Salva la risposta dell'AI nel DB
     await addMessage('assistant', responseText, isSuemMode);
+
+    // 4. AGGIORNAMENTO COMMENTO NEL DIARIO (Solo se abbiamo salvato dati poco fa)
+    if (savedVitalRecordId) {
+      // Aggiorniamo il record 'vital_signs' sostituendo "Analisi in corso..." con la risposta vera di Lisa
+      await updateVitalSignComment(savedVitalRecordId, responseText);
+    }
 
   } catch (error) {
     console.error("Errore Chat Gemini:", error);
@@ -242,8 +253,7 @@ export function setReminder(minutes) {
   console.log(`Timer IN-CHAT impostato: reminder tra ${minutes} minuti.`);
 
   setTimeout(() => {
-    // Messaggio generico: "Sono passati X minuti. Ci sono novità?"
-    // Lasciamo che sia Lisa (e l'utente) a decidere se serve una misurazione o altro.
+    // Messaggio generico
     const messaggio = `Ciao ${nomeUtente}! Sono passati ${minutes} minuti. Volevo sapere come va o se hai nuovi valori da comunicarmi.`;
     addMessage('assistant', messaggio);
   }, delay);

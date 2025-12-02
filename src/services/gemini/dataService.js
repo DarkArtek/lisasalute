@@ -1,7 +1,8 @@
 /* dataService.js - Gestione estrazione dati e memoria */
 import { model } from './client';
 import { supabase } from '../../supabase';
-import { DATA_EXTRACTION_PROMPT } from '../../prompts';
+// IMPORT CORRETTO: Puntiamo direttamente al file rinominato dataExtraction.js
+import { EXTRACTION_PROMPT } from '../../prompts/dataExtraction';
 
 // Funzione principale di estrazione
 export async function callGeminiForExtraction(userMessage) {
@@ -9,17 +10,7 @@ export async function callGeminiForExtraction(userMessage) {
     const extractionPayload = {
       contents: [{ role: 'user', parts: [{ text: userMessage }] }],
       systemInstruction: {
-        parts: [{
-          text: `
-          ${DATA_EXTRACTION_PROMPT}
-
-          AGGIUNTA MEMORIA:
-          Se nel testo l'utente menziona preferenze personali, abitudini o dettagli medici permanenti che dovresti ricordare per il futuro (es. "Uso il braccio destro", "Il mio medico è il Dr. House", "Odio le pastiglie grandi", "Uso il fonendoscopio Littmann"), estrai questo testo nel campo JSON "nuova_memoria".
-          Se non c'è nulla da ricordare a lungo termine, lascia il campo vuoto o null.
-
-          Esempio Output: { "pressione_sistolica": 120, "nuova_memoria": "Preferisce misurare sul braccio destro" }
-          `
-        }]
+        parts: [{ text: EXTRACTION_PROMPT }]
       },
       generationConfig: { responseMimeType: "application/json" }
     };
@@ -34,28 +25,53 @@ export async function callGeminiForExtraction(userMessage) {
   }
 }
 
-// Salva i parametri vitali (logica esistente)
+// Salva i parametri vitali (ALLINEATO ALLO SCHEMA DB)
 export async function saveExtractedVitals(userId, data) {
-  if (!data || (!data.pressione_sistolica && !data.frequenza_cardiaca && !data.saturazione)) {
+  // Se non c'è nessun dato vitale, usciamo (evitiamo di salvare righe vuote o solo memoria)
+  if (!data || (!data.pressione_sistolica && !data.frequenza_cardiaca && !data.saturazione_ossigeno)) {
     return null;
   }
+
+  // Gestione della data: se l'utente ha detto "ieri", usiamo quella, altrimenti ADESSO.
+  const dataMisurazione = data.data_riferimento ? new Date(data.data_riferimento) : new Date();
 
   const { error, data: savedData } = await supabase
     .from('vital_signs')
     .insert({
       user_id: userId,
+      created_at: dataMisurazione.toISOString(), // Fondamentale per il diario
       pressione_sistolica: data.pressione_sistolica,
       pressione_diastolica: data.pressione_diastolica,
       frequenza_cardiaca: data.frequenza_cardiaca,
-      saturazione: data.saturazione,
-      metodo_misurazione: 'automatico',
-      commento_lisa: "Analisi in corso..."
+      saturazione_ossigeno: data.saturazione_ossigeno,
+      braccio: data.braccio,
+      metodo_misurazione: 'manuale', // Default Sfigmomanometro
+      commento_lisa: "Analisi in corso..." // Placeholder momentaneo
     })
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error("Errore Supabase:", error);
+    throw error;
+  }
   return savedData;
+}
+
+// --- NUOVA FUNZIONE: Aggiorna il commento DOPO che Lisa ha risposto ---
+export async function updateVitalSignComment(recordId, commentText) {
+  if (!recordId || !commentText) return;
+
+  const { error } = await supabase
+    .from('vital_signs')
+    .update({ commento_lisa: commentText })
+    .eq('id', recordId);
+
+  if (error) {
+    console.error("Errore aggiornamento commento Lisa:", error);
+  } else {
+    // console.log("Commento Lisa aggiornato nel DB per record:", recordId);
+  }
 }
 
 // Funzione per contare misurazioni odierne (per contextService)
@@ -97,7 +113,7 @@ export async function getWeeklyStats(userId) {
   return { avgSys, avgDia, status, count: data.length };
 }
 
-// --- NUOVA FUNZIONE MEMORIA A LUNGO TERMINE ---
+// --- FUNZIONE MEMORIA A LUNGO TERMINE ---
 export async function updateLongTermMemory(userId, newMemoryText) {
   if (!newMemoryText) return;
 
@@ -111,10 +127,9 @@ export async function updateLongTermMemory(userId, newMemoryText) {
 
     let currentMemory = profile?.lisa_memory || "";
 
-    // 2. Aggiungi nuova nota con data
-    const date = new Date().toLocaleDateString('it-IT');
-    // Aggiungiamo solo se non è già presente una nota simile (controllo base)
+    // 2. Aggiungi nuova nota con data se non è già presente
     if (!currentMemory.includes(newMemoryText)) {
+      const date = new Date().toLocaleDateString('it-IT');
       const updatedMemory = currentMemory
         ? `${currentMemory}\n[${date}] ${newMemoryText}`
         : `[${date}] ${newMemoryText}`;

@@ -17,7 +17,7 @@ Restituisci ESCLUSIVAMENTE un oggetto JSON con DUE campi di testo distinti.
 {
   "frequenza_cardiaca": <numero | null>,
   "commento_chat": "<Messaggio per l'utente in chat. Tono: Caldo, rassicurante, discorsivo. Usa il TU. Esempio: 'Ciao Mario, ho analizzato il tracciato del 12 ottobre. Vedo che il ritmo è regolare...'. NON usare elenchi puntati qui.>",
-  "commento_tecnico": "<Referto tecnico per la scheda dettaglio. Tono: Asecco, medico, sintetico. Usa elenchi puntati o Markdown strutturato.
+  "commento_tecnico": "<Referto tecnico per la scheda dettaglio. Tono: Asecco, medico. NON USARE ELENCHI PUNTATI.
   Esempio:
   * **Ritmo:** Sinusale regolare
   * **FC:** 75 bpm

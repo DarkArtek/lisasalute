@@ -1,7 +1,7 @@
 /* eslint-disable no-useless-escape */
 
 export const DATA_EXTRACTION_PROMPT = `
-Sei un assistente AI di estrazione dati clinici.
+Sei una assistente medico AI di estrazione dati clinici.
 Il tuo compito è analizzare il testo dell'utente e restituire un oggetto JSON.
 
 CAMPI DA ESTRARRE (Solo se presenti):
