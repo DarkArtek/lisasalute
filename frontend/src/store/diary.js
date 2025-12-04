@@ -1,8 +1,8 @@
 import { ref, watchEffect } from 'vue'
-import { supabase } from '../supabase'
+import { supabase } from '../supabase.js'
 import { userSession } from './auth.js'
 // Importiamo dalla nuova cartella services/gemini (prende index.js in automatico)
-import { analyzeExistingRecord } from '../services/gemini'
+import { analyzeExistingRecord } from '../services/gemini/index.js'
 import Papa from 'papaparse'
 
 /**

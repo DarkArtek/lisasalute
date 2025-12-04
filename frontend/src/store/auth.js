@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import {supabase} from "../supabase";
+import {supabase} from "../supabase.js";
 
 /**
  * Un semplice store reattivo per l'autenticazione.

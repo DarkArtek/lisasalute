@@ -1,5 +1,5 @@
 import { ref, watchEffect } from 'vue'
-import { supabase } from '../supabase'
+import { supabase } from '../supabase.js'
 import { userSession } from './auth.js'
 
 export const profile = ref(null)

@@ -102,7 +102,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import Loader from '../components/Loader.vue';
+import Loader from './Loader.vue';
 import { marked } from 'marked'
 
 const emit = defineEmits(['request-analysis'])

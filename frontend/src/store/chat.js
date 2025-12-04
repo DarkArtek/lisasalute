@@ -1,11 +1,11 @@
 import { ref, watchEffect, nextTick } from 'vue'
-import { supabase } from '../supabase'
+import { supabase } from '../supabase.js'
 import { userSession } from './auth.js'
 import { profile } from './profile.js'
 
 // --- IMPORT PER L'INTELLIGENZA ARTIFICIALE (GEMINI) ---
-import { model } from '../services/gemini/client';
-import { buildSystemInstruction, buildChatHistory } from '../services/gemini/contextService';
+import { model } from '../services/gemini/client.js';
+import { buildSystemInstruction, buildChatHistory } from '../services/gemini/contextService.js';
 import {
   callGeminiForExtraction,
   saveExtractedVitals,
@@ -13,10 +13,10 @@ import {
   getWeeklyStats,
   updateLongTermMemory,
   updateVitalSignComment // <--- NUOVO IMPORT
-} from '../services/gemini/dataService';
+} from '../services/gemini/dataService.js';
 
 // Importiamo i prompt per le due personalità
-import { NURSE_ANALYSIS_PROMPT, SUEM_ASSISTANT_PROMPT } from '../prompts';
+import { NURSE_ANALYSIS_PROMPT, SUEM_ASSISTANT_PROMPT } from '../prompts/index.js';
 
 /**
  * Gestisce lo stato della cronologia chat

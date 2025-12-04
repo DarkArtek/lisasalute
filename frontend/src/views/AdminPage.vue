@@ -146,7 +146,7 @@
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase.js';
 
 // Stati
 const drugs = ref([]);

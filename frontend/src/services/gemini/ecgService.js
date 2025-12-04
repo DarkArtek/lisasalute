@@ -1,8 +1,8 @@
 /* ecgService.js - Logica ECG (Analisi + Upload) */
-import { supabase } from '../../supabase'
-import { genAI } from './client'
-import { ECG_ANALYSIS_JSON_PROMPT } from '../../prompts'
-import { saveExtractedVitals } from './dataService'
+import { supabase } from '../../supabase.js'
+import { genAI } from './client.js'
+import { ECG_ANALYSIS_JSON_PROMPT } from '../../prompts/index.js'
+import { saveExtractedVitals } from './dataService.js'
 
 const modelName = 'gemini-2.5-pro'
 

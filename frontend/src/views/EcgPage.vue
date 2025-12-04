@@ -97,8 +97,8 @@
 // ... (script setup invariato, ricorda di importare le icone necessarie in main.js se "plus" o "arrow-left" mancano) ...
 import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ecgs, fetchEcgs, loading, error } from '../store/diary';
-import { supabase } from '../supabase';
+import { ecgs, fetchEcgs, loading, error } from '../store/diary.js';
+import { supabase } from '../supabase.js';
 import Loader from '../components/Loader.vue';
 
 const router = useRouter();

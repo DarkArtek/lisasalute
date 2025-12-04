@@ -107,7 +107,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase.js';
 
 const emit = defineEmits(['drug-added']);
 

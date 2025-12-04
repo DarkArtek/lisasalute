@@ -1,6 +1,6 @@
 /* contextService.js - Costruzione del contesto per il Prompt */
-import { profile } from '../../store/profile';
-import { medications } from '../../store/profile';
+import { profile } from '../../store/profile.js';
+import { medications } from '../../store/profile.js';
 
 // Modificato per accettare il flag isSuemMode
 export function buildSystemInstruction(basePrompt, todaysCount = 0, weeklyStats = null, isSuemMode = false) {

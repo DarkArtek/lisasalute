@@ -67,8 +67,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { supabase } from '../supabase';
-import { requestAnalysis } from '../store/diary';
+import { supabase } from '../supabase.js';
+import { requestAnalysis } from '../store/diary.js';
 import { marked } from 'marked';
 import Loader from '../components/Loader.vue';
 

@@ -77,7 +77,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { askLisa } from '../services/gemini/index'; // Usiamo il service modulare
+import { askLisa } from '../services/gemini/index.js'; // Usiamo il service modulare
 
 const router = useRouter();
 const fileInput = ref(null);

@@ -80,7 +80,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase.js';
 // --- CORREZIONE: importiamo l'URL del logo ---
 import logoUrl from '../assets/logo.svg';
 

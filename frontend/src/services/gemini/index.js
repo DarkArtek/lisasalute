@@ -1,15 +1,15 @@
 /* index.js - Punto di ingresso dei servizi AI */
-import { model } from './client'
-import { supabase } from '../../supabase'
-import { userSession } from '../../store/auth'
-import { profile, fetchProfile } from '../../store/profile'
-import { fetchVitals } from '../../store/diary'
-import { NURSE_ANALYSIS_PROMPT, DOCTOR_REPORT_PROMPT } from '../../prompts'
+import { model } from './client.js'
+import { supabase } from '../../supabase.js'
+import { userSession } from '../../store/auth.js'
+import { profile, fetchProfile } from '../../store/profile.js'
+import { fetchVitals } from '../../store/diary.js'
+import { NURSE_ANALYSIS_PROMPT, DOCTOR_REPORT_PROMPT } from '../../prompts/index.js'
 
 // Importiamo dai sotto-moduli
-import { callGeminiForExtraction, saveExtractedVitals, updateLongTermMemory, getTodaysMeasurementCount, getWeeklyStats } from './dataService'
-import { callGeminiForEcgAnalysis, uploadEcgAndSaveVitals, getLastEcgAnalysis } from './ecgService'
-import { buildSystemInstruction, buildChatHistory } from './contextService'
+import { callGeminiForExtraction, saveExtractedVitals, updateLongTermMemory, getTodaysMeasurementCount, getWeeklyStats } from './dataService.js'
+import { callGeminiForEcgAnalysis, uploadEcgAndSaveVitals, getLastEcgAnalysis } from './ecgService.js'
+import { buildSystemInstruction, buildChatHistory } from './contextService.js'
 
 async function callGeminiApi(payload) {
   try {

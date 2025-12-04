@@ -5,7 +5,7 @@ import './style.css' // Carica gli stili Tailwind
 import App from './App.vue'
 
 // 2. Router (per le pagine)
-import router from './router'
+import router from './router.js'
 
 // 3. Font Awesome (Icone)
 import { library } from '@fortawesome/fontawesome-svg-core'

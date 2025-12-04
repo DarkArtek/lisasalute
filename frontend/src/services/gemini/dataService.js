@@ -1,8 +1,8 @@
 /* dataService.js - Gestione estrazione dati e memoria */
-import { model } from './client';
-import { supabase } from '../../supabase';
+import { model } from './client.js';
+import { supabase } from '../../supabase.js';
 // IMPORT CORRETTO: Puntiamo direttamente al file rinominato dataExtraction.js
-import { EXTRACTION_PROMPT } from '../../prompts/dataExtraction';
+import { EXTRACTION_PROMPT } from '../../prompts/dataExtraction.js';
 
 // Funzione principale di estrazione
 export async function callGeminiForExtraction(userMessage) {

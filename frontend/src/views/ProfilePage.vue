@@ -176,7 +176,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase.js';
 import { userSession } from '../store/auth.js';
 import {
   profile,
